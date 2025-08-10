@@ -19,6 +19,12 @@ import {
   ListItem,
   ListItemText,
   ListItemIcon,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  FormHelperText,
+  Chip,
 } from '@mui/material';
 import {
   Save as SaveIcon,
@@ -31,6 +37,7 @@ import {
 } from '@mui/icons-material';
 import { getSettings, updateSetting, resetSetting } from '../services/api';
 import toast from 'react-hot-toast';
+import FolderBrowser from '../components/FolderBrowser';
 
 export default function Settings() {
   const [localSettings, setLocalSettings] = useState({});
@@ -41,8 +48,17 @@ export default function Settings() {
     'settings',
     getSettings,
     {
+      refetchOnMount: 'always',
+      refetchOnWindowFocus: false,
+      staleTime: 0, // Always consider data stale
+      cacheTime: 0, // Don't cache the data
       onSuccess: (data) => {
-        setLocalSettings(data.settings || {});
+        console.log('Settings loaded:', data);
+        console.log('Settings structure:', data?.settings);
+        setLocalSettings(data?.settings || {});
+      },
+      onError: (error) => {
+        console.error('Settings loading error:', error);
       }
     }
   );
@@ -110,6 +126,77 @@ export default function Settings() {
   const renderSettingControl = (key, setting) => {
     const { value, type, description } = setting;
 
+    // Special handling for lyrics storage method
+    if (key === 'lyrics.storage_method') {
+      return (
+        <FormControl fullWidth size="small">
+          <InputLabel>Storage Method</InputLabel>
+          <Select
+            value={value}
+            label="Storage Method"
+            onChange={(e) => handleSettingChange(key, e.target.value)}
+          >
+            <MenuItem value="lrc_files">📄 Save as .lrc files</MenuItem>
+            <MenuItem value="embedded">🎵 Embed in audio files</MenuItem>
+            <MenuItem value="both">📄🎵 Both: .lrc files + embedded</MenuItem>
+          </Select>
+          <FormHelperText>{description}</FormHelperText>
+        </FormControl>
+      );
+    }
+
+    // Special handling for folder include/exclude settings
+    if (key === 'scanner.include_subfolders' || key === 'scanner.exclude_subfolders') {
+      const folders = Array.isArray(value) ? value : [];
+      const mode = key.includes('include') ? 'include' : 'exclude';
+      
+      return (
+        <Box>
+          <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+            <FolderBrowser
+              title={mode === 'include' ? 'Include Folders' : 'Exclude Folders'}
+              selectedPaths={folders}
+              onSelectionChange={(selectedPaths) => handleSettingChange(key, selectedPaths)}
+              mode={mode}
+            />
+          </Box>
+          
+          {/* Show selected folders as chips */}
+          {folders.length > 0 && (
+            <Box mt={1}>
+              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                Selected folders ({folders.length}):
+              </Typography>
+              <Box display="flex" flexWrap="wrap" gap={0.5}>
+                {folders.slice(0, 10).map((folder, index) => (
+                  <Chip
+                    key={index}
+                    label={folder}
+                    size="small"
+                    variant="outlined"
+                    onDelete={() => {
+                      const newFolders = folders.filter((_, i) => i !== index);
+                      handleSettingChange(key, newFolders);
+                    }}
+                  />
+                ))}
+                {folders.length > 10 && (
+                  <Chip
+                    label={`+${folders.length - 10} more`}
+                    size="small"
+                    variant="outlined"
+                    color="secondary"
+                  />
+                )}
+              </Box>
+            </Box>
+          )}
+          
+          <FormHelperText>{description}</FormHelperText>
+        </Box>
+      );
+    }
+
     switch (type) {
       case 'boolean':
         return (
@@ -176,6 +263,8 @@ export default function Settings() {
   const groupSettings = (settings) => {
     const groups = {};
     
+    console.log('Grouping settings:', settings);
+    
     Object.entries(settings).forEach(([key, setting]) => {
       const [category] = key.split('.');
       if (!groups[category]) {
@@ -184,6 +273,7 @@ export default function Settings() {
       groups[category][key] = setting;
     });
     
+    console.log('Settings groups:', groups);
     return groups;
   };
 
@@ -253,6 +343,13 @@ export default function Settings() {
   }
 
   const settingsGroups = groupSettings(localSettings);
+  
+  console.log('Rendering Settings:', { 
+    localSettings, 
+    settingsGroups, 
+    hasSettings: Object.keys(localSettings).length > 0,
+    settingsKeys: Object.keys(localSettings)
+  });
 
   return (
     <Box sx={{ flexGrow: 1, p: 3 }}>

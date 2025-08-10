@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 require('dotenv').config();
 
 const { initializeDatabase } = require('./src/database');
@@ -14,6 +15,7 @@ const lyricsRouter = require('./src/routes/lyrics');
 const scanRouter = require('./src/routes/scan');
 const healthRouter = require('./src/routes/health');
 const cleanupRouter = require('./src/routes/cleanup');
+const publishRouter = require('./src/routes/publish');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -41,12 +43,16 @@ app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Static file serving for album artwork
+app.use('/artwork', express.static(path.join(__dirname, 'public', 'artwork')));
+
 // Routes
 app.use('/api/health', healthRouter);
 app.use('/api/tracks', tracksRouter);
 app.use('/api/lyrics', lyricsRouter);
 app.use('/api/scan', scanRouter);
 app.use('/api/cleanup', cleanupRouter);
+app.use('/api/publish', publishRouter);
 app.use('/api/settings', require('./src/routes/settings'));
 
 // Error handling middleware

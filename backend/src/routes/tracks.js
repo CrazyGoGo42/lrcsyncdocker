@@ -72,7 +72,7 @@ router.get('/', async (req, res) => {
       SELECT 
         id, file_path, filename, title, artist, album, album_artist,
         genre, year, track_number, duration, file_size, has_lyrics,
-        lyrics_source, lyrics_accuracy, created_at, updated_at
+        lyrics_source, lyrics_accuracy, artwork_path, created_at, updated_at
       FROM tracks 
       ${whereClause}
       ORDER BY ${sortColumn} ${order}, title ASC
@@ -122,7 +122,7 @@ router.get('/:id', async (req, res) => {
       SELECT 
         id, file_path, filename, title, artist, album, album_artist,
         genre, year, track_number, duration, file_size, has_lyrics,
-        lyrics_source, lyrics_accuracy, created_at, updated_at, last_scanned
+        lyrics_source, lyrics_accuracy, artwork_path, created_at, updated_at, last_scanned
       FROM tracks 
       WHERE id = $1
     `, [id]);
@@ -231,6 +231,7 @@ router.get('/:trackId/audio', audioCorsMiddleware, async (req, res) => {
     const { trackId } = req.params;
     
     console.log(`🎵 Audio stream request for trackId: "${trackId}" (type: ${typeof trackId})`);
+    console.log(`🎵 Request headers:`, req.headers);
     
     // Validate trackId is numeric
     if (!trackId || isNaN(trackId)) {
@@ -241,15 +242,20 @@ router.get('/:trackId/audio', audioCorsMiddleware, async (req, res) => {
     // Get track info
     const trackResult = await query('SELECT * FROM tracks WHERE id = $1', [parseInt(trackId)]);
     if (trackResult.rows.length === 0) {
+      console.log(`❌ Track not found in database: ${trackId}`);
       return res.status(404).json({ error: 'Track not found' });
     }
     
     const track = trackResult.rows[0];
     const filePath = track.file_path;
     
+    console.log(`🎵 Track found: ${track.artist} - ${track.title}`);
+    console.log(`📁 File path: ${filePath}`);
+    
     // Check if file exists
     if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: 'Audio file not found' });
+      console.log(`❌ Audio file not found on filesystem: ${filePath}`);
+      return res.status(404).json({ error: 'Audio file not found', filePath });
     }
     
     const stat = fs.statSync(filePath);
@@ -269,19 +275,46 @@ router.get('/:trackId/audio', audioCorsMiddleware, async (req, res) => {
     };
     const mimeType = mimeTypes[ext] || 'audio/mpeg';
     
+    console.log(`🎵 File info: size=${fileSize}, mime=${mimeType}, ext=${ext}`);
+    console.log(`🎵 Range header: ${range || 'none'}`);
+    
     if (range) {
       // Handle range requests for audio streaming
-      const parts = range.replace(/bytes=/, "").split("-");
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      console.log(`📡 Handling range request: ${range}`);
       
-      if (start >= fileSize) {
+      const parts = range.replace(/bytes=/, "").split("-");
+      let start = parseInt(parts[0], 10);
+      let end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      
+      // Validate and sanitize range values
+      if (isNaN(start) || start < 0) {
+        start = 0;
+      }
+      if (isNaN(end) || end >= fileSize) {
+        end = fileSize - 1;
+      }
+      
+      // Check if range is satisfiable
+      if (start > end || start >= fileSize) {
+        console.log(`❌ Range not satisfiable: ${start}-${end}/${fileSize}`);
+        res.setHeader('Content-Range', `bytes */${fileSize}`);
         res.status(416).send('Range Not Satisfiable\n');
         return;
       }
       
       const chunksize = (end - start) + 1;
+      console.log(`📡 Sending range: ${start}-${end}/${fileSize} (${chunksize} bytes)`);
+      
       const file = fs.createReadStream(filePath, { start, end });
+      
+      // Handle stream errors
+      file.on('error', (streamError) => {
+        console.error('❌ File stream error:', streamError);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to stream audio file' });
+        }
+      });
+      
       const head = {
         'Content-Range': `bytes ${start}-${end}/${fileSize}`,
         'Accept-Ranges': 'bytes',
@@ -290,10 +323,24 @@ router.get('/:trackId/audio', audioCorsMiddleware, async (req, res) => {
         'Cache-Control': 'no-cache'
       };
       
+      console.log(`📡 Response headers:`, head);
+      
       res.writeHead(206, head);
       file.pipe(res);
     } else {
       // Serve entire file
+      console.log(`📡 Serving entire file: ${fileSize} bytes`);
+      
+      const file = fs.createReadStream(filePath);
+      
+      // Handle stream errors
+      file.on('error', (streamError) => {
+        console.error('❌ File stream error:', streamError);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to stream audio file' });
+        }
+      });
+      
       const head = {
         'Content-Length': fileSize,
         'Content-Type': mimeType,
@@ -301,8 +348,10 @@ router.get('/:trackId/audio', audioCorsMiddleware, async (req, res) => {
         'Cache-Control': 'no-cache'
       };
       
+      console.log(`📡 Response headers:`, head);
+      
       res.writeHead(200, head);
-      fs.createReadStream(filePath).pipe(res);
+      file.pipe(res);
     }
     
   } catch (error) {
@@ -311,6 +360,56 @@ router.get('/:trackId/audio', audioCorsMiddleware, async (req, res) => {
       error: 'Failed to stream audio',
       message: error.message
     });
+  }
+});
+
+// Debug endpoint to check track and file availability
+router.get('/:trackId/debug', async (req, res) => {
+  try {
+    const { trackId } = req.params;
+    
+    console.log(`🔧 Debug request for track: ${trackId}`);
+    
+    const trackResult = await query('SELECT * FROM tracks WHERE id = $1', [parseInt(trackId)]);
+    if (trackResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Track not found' });
+    }
+    
+    const track = trackResult.rows[0];
+    const filePath = track.file_path;
+    const fileExists = fs.existsSync(filePath);
+    
+    let fileStats = null;
+    if (fileExists) {
+      try {
+        fileStats = fs.statSync(filePath);
+      } catch (error) {
+        fileStats = { error: error.message };
+      }
+    }
+    
+    res.json({
+      track: {
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        file_path: track.file_path
+      },
+      file: {
+        path: filePath,
+        exists: fileExists,
+        stats: fileStats ? {
+          size: fileStats.size,
+          mtime: fileStats.mtime,
+          isFile: fileStats.isFile?.()
+        } : null
+      }
+    });
+    
+  } catch (error) {
+    console.error('Debug error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

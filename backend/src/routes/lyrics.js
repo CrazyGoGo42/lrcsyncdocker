@@ -42,51 +42,58 @@ router.get('/track/:trackId', async (req, res) => {
   try {
     const { trackId } = req.params;
     
+    console.log(`🎵 Getting lyrics for track ID: ${trackId}`);
+    
     // Get track info
     const trackResult = await query('SELECT * FROM tracks WHERE id = $1', [trackId]);
     if (trackResult.rows.length === 0) {
+      console.log(`❌ Track not found: ${trackId}`);
       return res.status(404).json({ error: 'Track not found' });
     }
     
     const track = trackResult.rows[0];
+    console.log(`📀 Track: ${track.artist} - ${track.title} (has_lyrics: ${track.has_lyrics})`);
+    console.log(`📁 File path: ${track.file_path}`);
     
-    // Check if LRC file exists
+    // Check if LRC file exists first
     const lrcPath = track.file_path.replace(/\.[^/.]+$/, '.lrc');
+    console.log(`🔍 Checking for LRC file: ${lrcPath}`);
     
     try {
       const lrcContent = await fs.readFile(lrcPath, 'utf8');
+      console.log(`✅ Found LRC file for: ${track.title}`);
       res.json({
         hasLyrics: true,
         lyrics: lrcContent,
         source: 'local',
         filePath: lrcPath
       });
-    } catch (error) {
-      // No .lrc file found, check for embedded lyrics
-      console.log(`📂 No .lrc file found for ${track.title}, checking embedded lyrics...`);
+      return;
+    } catch (lrcError) {
+      console.log(`📂 No .lrc file found for ${track.title} (${lrcError.code}), checking embedded lyrics...`);
+    }
+    
+    // Check for embedded lyrics
+    try {
+      console.log(`🔍 Checking embedded lyrics in: ${track.file_path}`);
+      const embeddedResult = await lyricsEmbedder.readEmbeddedLyrics(track.file_path);
       
-      try {
-        const embeddedResult = await lyricsEmbedder.readEmbeddedLyrics(track.file_path);
-        
-        if (embeddedResult.hasLyrics) {
-          console.log(`🎵 Found embedded lyrics for: ${track.title}`);
-          res.json({
-            hasLyrics: true,
-            lyrics: embeddedResult.lyrics,
-            source: 'embedded',
-            filePath: track.file_path
-          });
-        } else {
-          console.log(`❌ No lyrics found for: ${track.title}`);
-          res.json({
-            hasLyrics: false,
-            lyrics: null,
-            source: null,
-            filePath: lrcPath
-          });
-        }
-      } catch (embeddedError) {
-        console.error('Error reading embedded lyrics:', embeddedError);
+      console.log(`🎵 Embedded lyrics result:`, {
+        hasLyrics: embeddedResult.hasLyrics,
+        lyricsLength: embeddedResult.lyrics?.length || 0,
+        source: embeddedResult.source
+      });
+      
+      if (embeddedResult.hasLyrics && embeddedResult.lyrics) {
+        console.log(`✅ Found embedded lyrics for: ${track.title}`);
+        res.json({
+          hasLyrics: true,
+          lyrics: embeddedResult.lyrics,
+          source: 'embedded',
+          filePath: track.file_path
+        });
+      } else {
+        console.log(`❌ No embedded lyrics found for: ${track.title}`);
         res.json({
           hasLyrics: false,
           lyrics: null,
@@ -94,6 +101,15 @@ router.get('/track/:trackId', async (req, res) => {
           filePath: lrcPath
         });
       }
+    } catch (embeddedError) {
+      console.error(`❌ Error reading embedded lyrics for ${track.title}:`, embeddedError);
+      res.json({
+        hasLyrics: false,
+        lyrics: null,
+        source: null,
+        filePath: lrcPath,
+        error: embeddedError.message
+      });
     }
 
   } catch (error) {
@@ -102,6 +118,71 @@ router.get('/track/:trackId', async (req, res) => {
       error: 'Failed to get lyrics',
       message: error.message
     });
+  }
+});
+
+// Diagnostic endpoint to check lyrics detection
+router.get('/debug/:trackId', async (req, res) => {
+  try {
+    const { trackId } = req.params;
+    
+    console.log(`🔧 DEBUGGING: Track ID ${trackId}`);
+    
+    // Get track info
+    const trackResult = await query('SELECT * FROM tracks WHERE id = $1', [trackId]);
+    if (trackResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Track not found' });
+    }
+    
+    const track = trackResult.rows[0];
+    const lrcPath = track.file_path.replace(/\.[^/.]+$/, '.lrc');
+    
+    // Check LRC file
+    let lrcExists = false;
+    let lrcContent = null;
+    try {
+      lrcContent = await fs.readFile(lrcPath, 'utf8');
+      lrcExists = true;
+    } catch (error) {
+      // File doesn't exist
+    }
+    
+    // Check embedded lyrics
+    let embeddedResult = null;
+    try {
+      embeddedResult = await lyricsEmbedder.readEmbeddedLyrics(track.file_path);
+    } catch (error) {
+      embeddedResult = { hasLyrics: false, lyrics: null, error: error.message };
+    }
+    
+    // Check what scanner thinks
+    let scannerResult = null;
+    try {
+      scannerResult = await lyricsEmbedder.hasEmbeddedLyrics(track.file_path);
+    } catch (error) {
+      scannerResult = { error: error.message };
+    }
+    
+    res.json({
+      track: {
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        file_path: track.file_path,
+        has_lyrics: track.has_lyrics
+      },
+      lrcFile: {
+        path: lrcPath,
+        exists: lrcExists,
+        content: lrcExists ? lrcContent.substring(0, 200) + '...' : null
+      },
+      embedded: embeddedResult,
+      scannerDetection: scannerResult
+    });
+    
+  } catch (error) {
+    console.error('Debug error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -161,10 +242,33 @@ router.post('/save', async (req, res) => {
     }
     
     const track = trackResult.rows[0];
-    const lrcPath = track.file_path.replace(/\.[^/.]+$/, '.lrc');
     
-    // Save lyrics to file
-    await fs.writeFile(lrcPath, lyrics, 'utf8');
+    // Get storage method setting
+    const storageMethod = await getSetting('lyrics.storage_method', 'lrc_files');
+    
+    let lrcSaved = false;
+    let embeddedSaved = false;
+    let lrcPath = null;
+    
+    // Save based on storage method
+    if (storageMethod === 'lrc_files' || storageMethod === 'both') {
+      lrcPath = track.file_path.replace(/\.[^/.]+$/, '.lrc');
+      await fs.writeFile(lrcPath, lyrics, 'utf8');
+      lrcSaved = true;
+      console.log(`📄 Saved LRC file: ${lrcPath}`);
+    }
+    
+    if (storageMethod === 'embedded' || storageMethod === 'both') {
+      if (lyricsEmbedder.isSupported(track.file_path)) {
+        const embedResult = await lyricsEmbedder.embedLyrics(track.file_path, lyrics, lyrics);
+        embeddedSaved = embedResult.success;
+        if (embeddedSaved) {
+          console.log(`🎵 Embedded lyrics into: ${track.file_path}`);
+        } else {
+          console.error(`❌ Failed to embed lyrics: ${embedResult.message}`);
+        }
+      }
+    }
     
     // Update track record
     await query(`
@@ -176,7 +280,10 @@ router.post('/save', async (req, res) => {
     res.json({
       success: true,
       message: 'Lyrics saved successfully',
-      filePath: lrcPath
+      filePath: lrcPath,
+      storageMethod,
+      lrcSaved,
+      embeddedSaved
     });
 
   } catch (error) {
@@ -216,12 +323,7 @@ async function getSetting(key, defaultValue) {
 // Bulk download lyrics for multiple tracks
 router.post('/bulk-download', async (req, res) => {
   try {
-    let { trackIds, embedLyrics } = req.body;
-    
-    // Use setting default if not specified
-    if (embedLyrics === undefined) {
-      embedLyrics = await getSetting('lyrics.embed_by_default', false);
-    }
+    const { trackIds } = req.body;
     
     if (!Array.isArray(trackIds) || trackIds.length === 0) {
       return res.status(400).json({
@@ -230,11 +332,37 @@ router.post('/bulk-download', async (req, res) => {
     }
 
     // Get settings for lyrics processing
-    const saveLrcFiles = await getSetting('lyrics.save_lrc_files', true);
+    const storageMethod = await getSetting('lyrics.storage_method', 'lrc_files');
     const overwriteExisting = await getSetting('lyrics.overwrite_existing', false);
     
+    console.log(`🎵 Using storage method: ${storageMethod}`);
+    
+    // Determine what to save based on storage method
+    let saveLrcFiles = false;
+    let saveEmbedded = false;
+    
+    switch (storageMethod) {
+      case 'lrc_files':
+        saveLrcFiles = true;
+        saveEmbedded = false;
+        break;
+      case 'embedded':
+        saveLrcFiles = false;
+        saveEmbedded = true;
+        break;
+      case 'both':
+        saveLrcFiles = true;
+        saveEmbedded = true;
+        break;
+      default:
+        saveLrcFiles = true; // fallback to lrc files
+        saveEmbedded = false;
+    }
+    
+    console.log(`📄 Save LRC files: ${saveLrcFiles}, 🎵 Embed: ${saveEmbedded}`);
+    
     // Process directly without Redis
-    const results = await processBulkLyricsDownloadDirect(trackIds, embedLyrics, {
+    const results = await processBulkLyricsDownloadDirect(trackIds, saveEmbedded, {
       saveLrcFiles,
       overwriteExisting
     });

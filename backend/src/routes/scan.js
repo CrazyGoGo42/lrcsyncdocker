@@ -1,9 +1,10 @@
 const express = require('express');
-const MusicScanner = require('../services/musicScanner');
+const fs = require('fs');
+const path = require('path');
+const scanner = require('../services/musicScanner');
 const { addJob, getJob } = require('../redis');
 
 const router = express.Router();
-const scanner = new MusicScanner();
 
 // Direct scan processing function
 async function processScanJobDirect(directory, jobId, res) {
@@ -22,7 +23,11 @@ async function processScanJobDirect(directory, jobId, res) {
         tracksFound: results.processed,
         newTracks: results.new,
         updatedTracks: results.updated,
-        errors: results.errors.length
+        cachedTracks: results.cached,
+        deletedTracks: results.deleted,
+        totalInDb: results.total_in_db,
+        errors: results.errors.length,
+        errorDetails: results.errors
       }
     });
   } catch (error) {
@@ -81,7 +86,7 @@ router.get('/status/:jobId', async (req, res) => {
 // Get scan statistics
 router.get('/stats', async (req, res) => {
   try {
-    const stats = await scanner.getStats();
+    const stats = await scanner.getScanStats();
     res.json(stats);
   } catch (error) {
     console.error('Stats error:', error);
@@ -124,5 +129,89 @@ async function processScanJob(jobId) {
     });
   }
 }
+
+// Helper function to build folder tree
+async function buildFolderTree(dirPath, relativePath = '', maxDepth = 5, currentDepth = 0) {
+  if (currentDepth >= maxDepth) {
+    return null;
+  }
+
+  try {
+    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+    const folders = entries
+      .filter(entry => entry.isDirectory())
+      .map(entry => entry.name)
+      .sort();
+
+    if (folders.length === 0) {
+      return null;
+    }
+
+    const tree = {
+      name: path.basename(dirPath),
+      path: relativePath,
+      children: []
+    };
+
+    for (const folderName of folders) {
+      const folderPath = path.join(dirPath, folderName);
+      const folderRelativePath = relativePath ? `${relativePath}/${folderName}` : folderName;
+      
+      const subtree = await buildFolderTree(folderPath, folderRelativePath, maxDepth, currentDepth + 1);
+      
+      const folderNode = {
+        name: folderName,
+        path: folderRelativePath,
+        children: subtree ? subtree.children : []
+      };
+      
+      tree.children.push(folderNode);
+    }
+
+    return tree;
+  } catch (error) {
+    console.error(`Error reading directory ${dirPath}:`, error);
+    return null;
+  }
+}
+
+// Get folder structure for include/exclude selection
+router.get('/folders', async (req, res) => {
+  try {
+    const musicDir = process.env.MUSIC_PATH || '/app/music';
+    
+    console.log(`📁 Building folder tree for: ${musicDir}`);
+    
+    if (!fs.existsSync(musicDir)) {
+      return res.status(404).json({
+        error: 'Music directory not found',
+        path: musicDir
+      });
+    }
+
+    const folderTree = await buildFolderTree(musicDir);
+    
+    if (!folderTree) {
+      return res.json({
+        success: true,
+        folders: [],
+        message: 'No subfolders found'
+      });
+    }
+
+    res.json({
+      success: true,
+      folders: folderTree.children || [], // Return only the subfolders, not the root
+      rootPath: musicDir
+    });
+
+  } catch (error) {
+    console.error('Folder tree error:', error);
+    res.status(500).json({
+      error: 'Failed to get folder structure',
+      message: error.message
+    });
+  }
+});
 
 module.exports = router;

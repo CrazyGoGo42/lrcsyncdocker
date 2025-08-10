@@ -44,19 +44,22 @@ const LyricsEditor = ({ open, onClose, track }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [parsedLyrics, setParsedLyrics] = useState([]);
   const [highlightedLine, setHighlightedLine] = useState(-1);
+  const [isLoadingLyrics, setIsLoadingLyrics] = useState(false);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const [audioError, setAudioError] = useState(null);
+  const [hoverTime, setHoverTime] = useState(null);
+  const [isHoveringProgressBar, setIsHoveringProgressBar] = useState(false);
   
   const audioRef = useRef(null);
+  const progressBarRef = useRef(null);
+  const lyricsContainerRef = useRef(null);
   const queryClient = useQueryClient();
   
-  // Debug audioRef initialization
+  // Initialize audioRef
   useEffect(() => {
-    console.log('🎵 AudioRef initialized:', !!audioRef.current);
     // Wait for audio element to be rendered
     const checkAudioRef = () => {
-      if (audioRef.current) {
-        console.log('✅ Audio element is now available');
-      } else {
-        console.log('⏳ Waiting for audio element...');
+      if (!audioRef.current) {
         setTimeout(checkAudioRef, 100);
       }
     };
@@ -80,9 +83,7 @@ const LyricsEditor = ({ open, onClose, track }) => {
 
   // Load lyrics and audio when track changes
   useEffect(() => {
-    console.log('🎵 LyricsEditor useEffect triggered', { track, open });
     if (track && open) {
-      console.log('🎵 Loading track lyrics and audio for:', track);
       loadTrackLyrics();
       
       // Wait for audioRef to be available before loading audio
@@ -90,13 +91,32 @@ const LyricsEditor = ({ open, onClose, track }) => {
         if (audioRef.current) {
           loadAudio();
         } else {
-          console.log('⏳ Waiting for audioRef to be available...');
           setTimeout(waitForAudioRef, 50);
         }
       };
       waitForAudioRef();
     }
   }, [track, open]);
+
+  // Spacebar control for play/pause
+  useEffect(() => {
+    if (!open) return;
+
+    const handleKeyPress = (event) => {
+      // Only handle spacebar if not focused on input/textarea
+      if (event.code === 'Space' && 
+          !['INPUT', 'TEXTAREA'].includes(event.target.tagName) &&
+          !event.target.contentEditable) {
+        event.preventDefault();
+        togglePlayback();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyPress);
+    return () => {
+      document.removeEventListener('keydown', handleKeyPress);
+    };
+  }, [open, isPlaying, isLoadingAudio, audioError]);
 
   // Parse synced lyrics when lyrics change
   useEffect(() => {
@@ -107,7 +127,7 @@ const LyricsEditor = ({ open, onClose, track }) => {
     }
   }, [lyrics]);
 
-  // Update highlighted line based on current time
+  // Update highlighted line based on current time and auto-scroll
   useEffect(() => {
     if (isPlaying && isSynced && parsedLyrics.length > 0) {
       let activeIndex = -1;
@@ -118,21 +138,64 @@ const LyricsEditor = ({ open, onClose, track }) => {
           break;
         }
       }
-      setHighlightedLine(activeIndex);
+      
+      if (activeIndex !== highlightedLine) {
+        setHighlightedLine(activeIndex);
+        
+        // Auto-scroll to highlighted line
+        if (activeIndex >= 0 && lyricsContainerRef.current) {
+          const container = lyricsContainerRef.current;
+          const lineElement = container.children[activeIndex];
+          
+          if (lineElement) {
+            const containerHeight = container.clientHeight;
+            const lineHeight = lineElement.offsetHeight;
+            const lineOffsetTop = lineElement.offsetTop;
+            const containerScrollTop = container.scrollTop;
+            
+            // Calculate if we need to scroll
+            const lineBottom = lineOffsetTop + lineHeight;
+            const containerBottom = containerScrollTop + containerHeight;
+            
+            // Scroll to keep the highlighted line in the middle third of the container
+            const targetScrollTop = lineOffsetTop - containerHeight / 3;
+            
+            container.scrollTo({
+              top: Math.max(0, targetScrollTop),
+              behavior: 'smooth'
+            });
+          }
+        }
+      }
     }
-  }, [currentTime, isPlaying, isSynced, parsedLyrics]);
+  }, [currentTime, isPlaying, isSynced, parsedLyrics, highlightedLine]);
 
   const loadTrackLyrics = async () => {
+    if (!track?.id) {
+      console.warn('⚠️ Cannot load lyrics: track or track.id is missing');
+      return;
+    }
+
+    setIsLoadingLyrics(true);
     try {
       const response = await getTrackLyrics(track.id);
-      const lyricsText = response.lyrics || '';
+      const lyricsText = response?.lyrics || '';
+      
       setLyrics(lyricsText);
       setOriginalLyrics(lyricsText);
-      setIsEditing(false);
+      setIsEditing(!lyricsText); // Auto-enable edit mode if no lyrics
+      
+      if (lyricsText) {
+        toast.success(`Lyrics loaded from ${response?.source || 'unknown source'}`);
+      }
     } catch (error) {
       console.error('Failed to load lyrics:', error);
+      toast.error('Failed to load lyrics');
       setLyrics('');
       setOriginalLyrics('');
+      setIsEditing(true); // Enable edit mode on error
+    } finally {
+      setIsLoadingLyrics(false);
     }
   };
 
@@ -146,17 +209,18 @@ const LyricsEditor = ({ open, onClose, track }) => {
     
     if (!track || !audioRef.current) {
       console.log('❌ loadAudio: Missing track or audioRef', { track: !!track, audioRef: !!audioRef.current });
+      setAudioError('Audio player not ready');
       return;
     }
-    
-    console.log('🔍 Track object:', track);
-    console.log('🔍 Track ID:', track?.id, 'Type:', typeof track?.id);
     
     if (!track.id) {
       console.error('❌ Track has no ID property!');
+      setAudioError('Invalid track data');
       return;
     }
     
+    setIsLoadingAudio(true);
+    setAudioError(null);
     const audioUrl = `/api/tracks/${track.id}/audio`;
     
     console.log(`🎵 Loading audio from: ${audioUrl} for track:`, track.title);
@@ -165,11 +229,14 @@ const LyricsEditor = ({ open, onClose, track }) => {
     const audio = audioRef.current;
     audio.pause();
     audio.currentTime = 0;
+    setCurrentTime(0);
+    setIsPlaying(false);
     
     // Remove old listeners (create new functions to avoid issues)
     const loadedMetadataHandler = () => {
       console.log(`✅ Audio metadata loaded, duration: ${audio.duration}s`);
-      setDuration(audio.duration);
+      setDuration(audio.duration || 0);
+      setIsLoadingAudio(false);
     };
     
     const timeupdateHandler = () => {
@@ -183,21 +250,33 @@ const LyricsEditor = ({ open, onClose, track }) => {
     
     const errorHandler = (e) => {
       console.error('❌ Audio loading error:', e);
-      console.error('Audio error details:', {
+      const errorDetails = {
         error: audio.error?.code,
         errorMessage: audio.error?.message,
         networkState: audio.networkState,
         readyState: audio.readyState,
         src: audio.src
-      });
+      };
+      console.error('Audio error details:', errorDetails);
+      
+      setIsLoadingAudio(false);
+      setAudioError(`Audio loading failed (Error ${audio.error?.code || 'unknown'})`);
+      toast.error('Failed to load audio');
     };
     
     const canplayHandler = () => {
       console.log('✅ Audio can start playing');
+      setIsLoadingAudio(false);
+      setAudioError(null);
     };
     
     const loadstartHandler = () => {
       console.log('🔄 Audio loading started');
+      setIsLoadingAudio(true);
+    };
+    
+    const waitingHandler = () => {
+      console.log('⏳ Audio buffering...');
     };
     
     // Set new source and add listeners
@@ -208,6 +287,7 @@ const LyricsEditor = ({ open, onClose, track }) => {
     audio.addEventListener('error', errorHandler);
     audio.addEventListener('canplay', canplayHandler);
     audio.addEventListener('loadstart', loadstartHandler);
+    audio.addEventListener('waiting', waitingHandler);
     
     // Force load
     audio.load();
@@ -262,21 +342,52 @@ const LyricsEditor = ({ open, onClose, track }) => {
   };
 
   const handleTimeSeek = (time) => {
-    if (audioRef.current) {
+    if (audioRef.current && !isNaN(time) && time >= 0 && time <= duration) {
       audioRef.current.currentTime = time;
       setCurrentTime(time);
     }
   };
 
-  const togglePlayback = () => {
+  const handleProgressBarClick = (event) => {
+    if (!audioRef.current || !progressBarRef.current || duration === 0) return;
+    
+    const rect = progressBarRef.current.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const barWidth = rect.width;
+    const clickRatio = Math.max(0, Math.min(1, clickX / barWidth));
+    const seekTime = clickRatio * duration;
+    
+    console.log('🎯 Progress bar clicked:', { clickX, barWidth, clickRatio, seekTime });
+    handleTimeSeek(seekTime);
+  };
+
+  const handleProgressBarMouseMove = (event) => {
+    if (!progressBarRef.current || duration === 0) return;
+    
+    const rect = progressBarRef.current.getBoundingClientRect();
+    const hoverX = event.clientX - rect.left;
+    const barWidth = rect.width;
+    const hoverRatio = Math.max(0, Math.min(1, hoverX / barWidth));
+    const hoverTimeSeconds = hoverRatio * duration;
+    
+    setHoverTime(hoverTimeSeconds);
+  };
+
+  const togglePlayback = async () => {
     if (!audioRef.current) return;
     
-    if (isPlaying) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play();
+    try {
+      if (isPlaying) {
+        audioRef.current.pause();
+      } else {
+        await audioRef.current.play();
+      }
+      setIsPlaying(!isPlaying);
+    } catch (error) {
+      console.error('Playback error:', error);
+      toast.error('Playback failed');
+      setIsPlaying(false);
     }
-    setIsPlaying(!isPlaying);
   };
 
   const hasChanges = lyrics !== originalLyrics;
@@ -336,26 +447,101 @@ const LyricsEditor = ({ open, onClose, track }) => {
                 <Tooltip title={isPlaying ? 'Pause' : 'Play'}>
                   <IconButton 
                     onClick={togglePlayback}
+                    disabled={isLoadingAudio || !!audioError}
                     color="primary"
                     sx={{ 
-                      bgcolor: 'primary.main', 
+                      bgcolor: audioError ? 'error.main' : 'primary.main', 
                       color: 'white',
-                      '&:hover': { bgcolor: 'primary.dark' }
+                      '&:hover': { bgcolor: audioError ? 'error.dark' : 'primary.dark' },
+                      '&:disabled': { bgcolor: 'action.disabled' }
                     }}
                   >
-                    {isPlaying ? <PauseIcon /> : <PlayIcon />}
+                    {isLoadingAudio ? (
+                      <Box sx={{ width: 24, height: 24, position: 'relative' }}>
+                        <LinearProgress sx={{ 
+                          position: 'absolute', 
+                          top: '50%', 
+                          left: 0, 
+                          right: 0, 
+                          transform: 'translateY(-50%)',
+                          height: 2
+                        }} />
+                      </Box>
+                    ) : (
+                      isPlaying ? <PauseIcon /> : <PlayIcon />
+                    )}
                   </IconButton>
                 </Tooltip>
                 
-                <Box sx={{ flexGrow: 1 }}>
-                  <LinearProgress 
-                    variant="determinate" 
-                    value={(currentTime / duration) * 100}
-                    sx={{ mb: 0.5 }}
-                  />
-                  <Typography variant="caption" color="text.secondary">
-                    {formatTime(currentTime)} / {formatTime(duration)}
-                  </Typography>
+                <Box sx={{ flexGrow: 1, position: 'relative' }}>
+                  {/* Interactive Progress Bar */}
+                  <Box
+                    ref={progressBarRef}
+                    onClick={handleProgressBarClick}
+                    onMouseMove={handleProgressBarMouseMove}
+                    onMouseEnter={() => setIsHoveringProgressBar(true)}
+                    onMouseLeave={() => {
+                      setIsHoveringProgressBar(false);
+                      setHoverTime(null);
+                    }}
+                    sx={{
+                      position: 'relative',
+                      cursor: duration > 0 ? 'pointer' : 'default',
+                      mb: 0.5,
+                      '&:hover .MuiLinearProgress-root': {
+                        transform: 'scaleY(1.5)',
+                      }
+                    }}
+                  >
+                    <LinearProgress 
+                      variant="determinate" 
+                      value={duration > 0 ? (currentTime / duration) * 100 : 0}
+                      sx={{ 
+                        height: 6,
+                        borderRadius: 3,
+                        transition: 'transform 0.2s ease',
+                        backgroundColor: 'action.hover',
+                        '& .MuiLinearProgress-bar': {
+                          borderRadius: 3,
+                        }
+                      }}
+                    />
+                    
+                    {/* Hover time indicator */}
+                    {isHoveringProgressBar && hoverTime !== null && (
+                      <Box
+                        sx={{
+                          position: 'absolute',
+                          top: -35,
+                          left: `${(hoverTime / duration) * 100}%`,
+                          transform: 'translateX(-50%)',
+                          bgcolor: 'background.paper',
+                          color: 'text.primary',
+                          px: 1,
+                          py: 0.5,
+                          borderRadius: 1,
+                          fontSize: '0.75rem',
+                          border: 1,
+                          borderColor: 'divider',
+                          boxShadow: 2,
+                          zIndex: 1000,
+                        }}
+                      >
+                        {formatTime(hoverTime)}
+                      </Box>
+                    )}
+                  </Box>
+                  
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="caption" color="text.secondary">
+                      {formatTime(currentTime)} / {formatTime(duration)}
+                    </Typography>
+                    {audioError && (
+                      <Typography variant="caption" color="error.main">
+                        {audioError}
+                      </Typography>
+                    )}
+                  </Box>
                 </Box>
                 
                 <FormControlLabel
@@ -363,6 +549,7 @@ const LyricsEditor = ({ open, onClose, track }) => {
                     <Switch
                       checked={isEditing}
                       onChange={(e) => setIsEditing(e.target.checked)}
+                      disabled={isLoadingLyrics}
                     />
                   }
                   label="Edit Mode"
@@ -385,7 +572,21 @@ const LyricsEditor = ({ open, onClose, track }) => {
           {/* Lyrics Section */}
           <Grid item xs={12} sx={{ height: 'calc(100% - 120px)', overflow: 'hidden' }}>
             <Box sx={{ height: '100%', p: 2 }}>
-              {isEditing ? (
+              {isLoadingLyrics ? (
+                <Box sx={{ 
+                  height: '100%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  flexDirection: 'column',
+                  gap: 2
+                }}>
+                  <LinearProgress sx={{ width: '50%' }} />
+                  <Typography variant="body2" color="text.secondary">
+                    Loading lyrics...
+                  </Typography>
+                </Box>
+              ) : isEditing ? (
                 <TextField
                   fullWidth
                   multiline
@@ -405,7 +606,10 @@ const LyricsEditor = ({ open, onClose, track }) => {
                   }}
                 />
               ) : (
-                <Paper sx={{ height: '100%', overflow: 'auto', p: 2 }}>
+                <Paper 
+                  ref={lyricsContainerRef}
+                  sx={{ height: '100%', overflow: 'auto', p: 2 }}
+                >
                   {parsedLyrics.length > 0 ? (
                     parsedLyrics.map((line, index) => (
                       <Box

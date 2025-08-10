@@ -127,7 +127,19 @@ class LyricsEmbedder {
       switch (ext) {
         case '.mp3':
           const tags = NodeID3.read(filePath) || {};
-          return !!(tags.unsynchronisedLyrics || tags.comment);
+          
+          // Check for any lyrics content
+          const hasUnsyncedLyrics = tags.unsynchronisedLyrics?.text?.trim();
+          const hasSyncedInComment = tags.comment?.text?.trim() && tags.comment?.shortText === 'Synced Lyrics';
+          const hasCommentLyrics = tags.comment?.text?.trim();
+          
+          const hasAnyLyrics = !!(hasUnsyncedLyrics || hasSyncedInComment || hasCommentLyrics);
+          
+          if (hasAnyLyrics) {
+            console.log(`🎵 Has embedded lyrics: ${path.basename(filePath)} (unsync: ${!!hasUnsyncedLyrics}, synced: ${!!hasSyncedInComment}, comment: ${!!hasCommentLyrics})`);
+          }
+          
+          return hasAnyLyrics;
         default:
           return false;
       }
@@ -140,23 +152,48 @@ class LyricsEmbedder {
   async readEmbeddedLyrics(filePath) {
     const ext = path.extname(filePath).toLowerCase();
     
+    console.log(`🔍 Reading embedded lyrics from: ${filePath} (${ext})`);
+    
     try {
       switch (ext) {
         case '.mp3':
+          console.log(`📖 Reading ID3 tags from MP3: ${path.basename(filePath)}`);
           const tags = NodeID3.read(filePath) || {};
+          
+          console.log(`🏷️ Available ID3 tags:`, Object.keys(tags));
+          
           let lyrics = '';
+          let source = '';
           
           // Check for synced lyrics in comment field first
           if (tags.comment && tags.comment.text && tags.comment.shortText === 'Synced Lyrics') {
             lyrics = tags.comment.text;
+            source = 'comment (synced)';
+            console.log(`✅ Found synced lyrics in comment field: ${lyrics.length} characters`);
           }
           // Fall back to unsynchronized lyrics
           else if (tags.unsynchronisedLyrics && tags.unsynchronisedLyrics.text) {
             lyrics = tags.unsynchronisedLyrics.text;
+            source = 'unsynchronised';
+            console.log(`✅ Found unsynchronised lyrics: ${lyrics.length} characters`);
           }
           // Check comment field for any lyrics
           else if (tags.comment && tags.comment.text) {
             lyrics = tags.comment.text;
+            source = 'comment';
+            console.log(`✅ Found lyrics in comment field: ${lyrics.length} characters`);
+          }
+          
+          if (lyrics) {
+            console.log(`🎵 Extracted lyrics (${source}):`, lyrics.substring(0, 100) + '...');
+          } else {
+            console.log(`❌ No lyrics found in any ID3 field`);
+            if (tags.comment) {
+              console.log(`📝 Comment field exists but not lyrics:`, tags.comment);
+            }
+            if (tags.unsynchronisedLyrics) {
+              console.log(`📝 Unsynchronised lyrics field exists:`, tags.unsynchronisedLyrics);
+            }
           }
           
           return {
@@ -165,6 +202,7 @@ class LyricsEmbedder {
             source: 'embedded'
           };
         default:
+          console.log(`⚠️ Unsupported file format for embedded lyrics: ${ext}`);
           return {
             hasLyrics: false,
             lyrics: null,

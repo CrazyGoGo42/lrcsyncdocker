@@ -70,19 +70,27 @@ const apiService = {
 
   // Lyrics
   searchLyrics: (params) => api.get('/lyrics/search', { params }).then(response => response.data),
-  getTrackLyrics: (trackId) => api.get(`/lyrics/track/${trackId}`),
+  getTrackLyrics: (trackId) => api.get(`/lyrics/track/${trackId}`).then(response => response.data),
   downloadLyrics: (trackId, lyricsId, source = 'lrclib') => 
     api.post('/lyrics/download', { trackId, lyricsId, source }),
   saveLyrics: (trackId, lyrics) => api.post('/lyrics/save', { trackId, lyrics }),
-  bulkDownloadLyrics: (trackIds, embedLyrics = false) => api.post('/lyrics/bulk-download', { trackIds, embedLyrics }),
+  bulkDownloadLyrics: (trackIds) => api.post('/lyrics/bulk-download', { trackIds }),
 
   // Job status
   getJobStatus: (jobId) => api.get(`/scan/status/${jobId}`), // Generic job status endpoint
   
   // Settings
-  getSettings: () => api.get('/settings'),
+  getSettings: () => api.get('/settings').then(response => response.data),
   updateSetting: (key, value) => api.put(`/settings/${key}`, { value }),
-  resetSetting: (key) => api.delete(`/settings/${key}`)
+  resetSetting: (key) => api.delete(`/settings/${key}`),
+  
+  // Publishing
+  requestChallenge: () => api.post('/publish/request-challenge').then(response => response.data),
+  solveChallenge: (challengeData) => api.post('/publish/solve-challenge', challengeData).then(response => response.data),
+  publishLyrics: (publishData) => api.post('/publish/lyrics', publishData).then(response => response.data),
+  
+  // Enhanced lyrics functions
+  getLyrics: (trackId) => api.get(`/lyrics/track/${trackId}`).then(response => response.data)
 };
 
 // Named exports for easier importing
@@ -98,5 +106,9 @@ export const updateSetting = apiService.updateSetting;
 export const resetSetting = apiService.resetSetting;
 export const getTrackLyrics = apiService.getTrackLyrics;
 export const saveLyrics = apiService.saveLyrics;
+export const getLyrics = apiService.getLyrics;
+export const requestChallenge = apiService.requestChallenge;
+export const solveChallenge = apiService.solveChallenge;
+export const publishLyrics = apiService.publishLyrics;
 
 export { api, apiService };

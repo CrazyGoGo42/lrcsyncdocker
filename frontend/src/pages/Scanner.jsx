@@ -38,7 +38,8 @@ export default function Scanner() {
     onSuccess: (data) => {
       setIsScanning(false);
       setScanResults(data.results || data);
-      queryClient.invalidateQueries('tracks');
+      queryClient.invalidateQueries(['tracks']);
+      queryClient.refetchQueries(['tracks']);
       toast.success(`Scan completed! Found ${data.results?.tracksFound || 0} tracks`);
     },
     onError: (error) => {

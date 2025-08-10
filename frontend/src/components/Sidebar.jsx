@@ -19,6 +19,7 @@ import {
   Scanner as ScannerIcon,
   Settings as SettingsIcon,
   MusicNote as MusicNoteIcon,
+  PlayArrow as PlayIcon,
 } from '@mui/icons-material';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -27,6 +28,7 @@ const drawerWidth = 240;
 const navigationItems = [
   { title: 'Dashboard', icon: <DashboardIcon />, path: '/', description: 'Overview & Stats' },
   { title: 'Music Library', icon: <LibraryIcon />, path: '/library', description: 'Browse & Edit' },
+  { title: 'Now Playing', icon: <PlayIcon />, path: '/now-playing', description: 'Audio Player & Lyrics' },
   { title: 'Scanner', icon: <ScannerIcon />, path: '/scanner', description: 'Scan Music Files' },
   { title: 'Settings', icon: <SettingsIcon />, path: '/settings', description: 'App Configuration' },
 ];
@@ -42,11 +44,12 @@ export default function Sidebar({ open }) {
       anchor="left"
       open={open}
       sx={{
-        width: open ? drawerWidth : 0,
+        width: { xs: open ? '100%' : 0, md: open ? drawerWidth : 0 }, // Full width on mobile
         flexShrink: 0,
         '& .MuiDrawer-paper': {
-          width: drawerWidth,
+          width: { xs: '100%', md: drawerWidth }, // Full width on mobile
           boxSizing: 'border-box',
+          zIndex: { xs: 1300, md: 1200 }, // Higher z-index on mobile to overlay content
           borderRight: (theme) => mode === 'dark' 
             ? '1px solid rgba(148, 163, 184, 0.1)' 
             : '1px solid rgba(0, 0, 0, 0.12)',

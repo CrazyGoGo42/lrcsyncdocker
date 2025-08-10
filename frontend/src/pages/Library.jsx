@@ -21,6 +21,13 @@ import {
   CircularProgress,
   Alert,
   Fade,
+  Card,
+  CardContent,
+  CardActions,
+  useMediaQuery,
+  useTheme,
+  Grid,
+  Tooltip,
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -29,12 +36,14 @@ import {
   MusicNote as MusicNoteIcon,
   LibraryMusic as LibraryMusicIcon,
   FindInPage as FindInPageIcon,
+  PlayArrow as PlayIcon,
 } from '@mui/icons-material';
 import { getTracks, bulkDownloadLyrics, getSettings } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import LyricsEditor from '../components/LyricsEditor';
 import LyricsSearchDialog from '../components/LyricsSearchDialog';
 import toast from 'react-hot-toast';
+import { useNavigate } from 'react-router-dom';
 
 export default function Library() {
   const [page, setPage] = useState(0);
@@ -47,6 +56,9 @@ export default function Library() {
   
   const { selectedTracks, toggleTrackSelection, clearSelectedTracks, setSelectedTracks } = useAppStore();
   const queryClient = useQueryClient();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const navigate = useNavigate();
 
   const { data: tracks = [], isLoading, error } = useQuery(
     ['tracks', { search: searchTerm, page, limit: rowsPerPage }],
@@ -71,11 +83,8 @@ export default function Library() {
     }
   );
 
-  const filteredTracks = tracks.filter(track =>
-    track.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    track.artist?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    track.album?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Remove client-side filtering since server already handles it
+  const filteredTracks = tracks;
 
   const handleSelectAllClick = (event) => {
     if (event.target.checked) {
@@ -110,6 +119,13 @@ export default function Library() {
 
   const handleLyricsApplied = () => {
     queryClient.invalidateQueries('tracks');
+  };
+
+  const handlePlayTrack = (track) => {
+    // Set the track as selected and navigate to Now Playing
+    clearSelectedTracks();
+    toggleTrackSelection(track.id);
+    navigate('/now-playing');
   };
 
   if (error) {
@@ -160,7 +176,11 @@ export default function Library() {
                 size="small"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                sx={{ minWidth: 300, mr: 2 }}
+                sx={{ 
+                  minWidth: { xs: 200, sm: 300 },
+                  mr: { xs: 1, sm: 2 },
+                  width: { xs: '100%', sm: 'auto' }
+                }}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -177,28 +197,116 @@ export default function Library() {
           )}
         </Toolbar>
 
-        {/* Table */}
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell padding="checkbox">
-                  <Checkbox
-                    color="primary"
-                    indeterminate={numSelected > 0 && numSelected < filteredTracks.length}
-                    checked={filteredTracks.length > 0 && numSelected === filteredTracks.length}
-                    onChange={handleSelectAllClick}
-                  />
-                </TableCell>
-                <TableCell>Title</TableCell>
-                <TableCell>Artist</TableCell>
-                <TableCell>Album</TableCell>
-                <TableCell>Duration</TableCell>
-                <TableCell>Lyrics</TableCell>
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
+        {/* Responsive Content */}
+        {isMobile ? (
+          /* Mobile Card Layout */
+          <Box sx={{ p: 1 }}>
+            {isLoading ? (
+              <Box display="flex" justifyContent="center" py={4}>
+                <CircularProgress />
+              </Box>
+            ) : filteredTracks.length === 0 ? (
+              <Box display="flex" flexDirection="column" alignItems="center" py={4}>
+                <MusicNoteIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+                <Typography variant="h6" color="text.secondary">
+                  No tracks found
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {searchTerm ? 'Try adjusting your search' : 'Start by scanning your music directory'}
+                </Typography>
+              </Box>
+            ) : (
+              <Grid container spacing={2}>
+                {filteredTracks.map((track) => (
+                  <Grid item xs={12} key={track.id}>
+                    <Card 
+                      sx={{ 
+                        position: 'relative',
+                        backgroundColor: selectedTracks.includes(track.id) ? 'action.selected' : 'background.paper',
+                      }}
+                    >
+                      <CardContent sx={{ pb: 1 }}>
+                        <Box display="flex" alignItems="flex-start" gap={1}>
+                          <Checkbox
+                            checked={selectedTracks.includes(track.id)}
+                            onChange={() => toggleTrackSelection(track.id)}
+                            size="small"
+                          />
+                          <Box flex={1} minWidth={0}>
+                            <Typography variant="subtitle1" sx={{ fontWeight: 600 }} noWrap>
+                              {track.title}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" noWrap>
+                              {track.artist}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" noWrap>
+                              {track.album} • {formatDuration(track.duration)}
+                            </Typography>
+                            <Box mt={1}>
+                              <Chip
+                                size="small"
+                                label={track.has_lyrics ? `Lyrics (${track.lyrics_source})` : 'No lyrics'}
+                                color={track.has_lyrics ? 'success' : 'default'}
+                                variant="outlined"
+                              />
+                            </Box>
+                          </Box>
+                        </Box>
+                      </CardContent>
+                      <CardActions sx={{ pt: 0, justifyContent: 'flex-end' }}>
+                        <Tooltip title="Play track">
+                          <IconButton
+                            size="small"
+                            onClick={() => handlePlayTrack(track)}
+                            color="primary"
+                          >
+                            <PlayIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleEditLyrics(track)}
+                          color="primary"
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleSearchLyrics(track)}
+                          color="secondary"
+                        >
+                          <FindInPageIcon fontSize="small" />
+                        </IconButton>
+                      </CardActions>
+                    </Card>
+                  </Grid>
+                ))}
+              </Grid>
+            )}
+          </Box>
+        ) : (
+          /* Desktop Table Layout */
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      color="primary"
+                      indeterminate={numSelected > 0 && numSelected < filteredTracks.length}
+                      checked={filteredTracks.length > 0 && numSelected === filteredTracks.length}
+                      onChange={handleSelectAllClick}
+                    />
+                  </TableCell>
+                  <TableCell>Title</TableCell>
+                  <TableCell>Artist</TableCell>
+                  <TableCell>Album</TableCell>
+                  <TableCell>Duration</TableCell>
+                  <TableCell>Lyrics</TableCell>
+                  <TableCell>Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
               {isLoading ? (
                 <TableRow>
                   <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
@@ -250,6 +358,15 @@ export default function Library() {
                         />
                       </TableCell>
                       <TableCell>
+                        <Tooltip title="Play track">
+                          <IconButton
+                            size="small"
+                            onClick={() => handlePlayTrack(track)}
+                            color="primary"
+                          >
+                            <PlayIcon />
+                          </IconButton>
+                        </Tooltip>
                         <IconButton
                           size="small"
                           onClick={() => handleEditLyrics(track)}
@@ -286,6 +403,7 @@ export default function Library() {
             </TableBody>
           </Table>
         </TableContainer>
+        )}
 
         {/* Pagination */}
         <TablePagination

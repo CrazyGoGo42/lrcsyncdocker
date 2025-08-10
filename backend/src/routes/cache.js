@@ -109,4 +109,45 @@ router.post('/cleanup-temp', async (req, res) => {
   }
 });
 
+// Serve cached artwork files
+router.get('/artwork/:filename', async (req, res) => {
+  try {
+    const { filename } = req.params;
+    const fs = require('fs').promises;
+    const path = require('path');
+    
+    // Validate filename to prevent directory traversal
+    if (!filename.match(/^[a-f0-9]+\.(jpg|png|jpeg)$/i)) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+    
+    const artworkPath = path.join(process.env.CACHE_PATH || '/app/cache', 'artwork', filename);
+    
+    // Check if file exists
+    try {
+      await fs.access(artworkPath);
+    } catch (error) {
+      return res.status(404).json({ error: 'Artwork not found' });
+    }
+    
+    // Set appropriate headers
+    const ext = path.extname(filename).toLowerCase();
+    const contentType = ext === '.png' ? 'image/png' : 'image/jpeg';
+    
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+    
+    // Stream the file
+    const fileStream = require('fs').createReadStream(artworkPath);
+    fileStream.pipe(res);
+    
+  } catch (error) {
+    console.error('Artwork serve error:', error);
+    res.status(500).json({
+      error: 'Failed to serve artwork',
+      message: error.message
+    });
+  }
+});
+
 module.exports = router;

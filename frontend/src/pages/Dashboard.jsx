@@ -31,7 +31,7 @@ import { getTracks } from '../services/api';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { data: tracks, isLoading, error } = useQuery('tracks', getTracks);
+  const { data: tracksData, isLoading, error } = useQuery('tracks', () => getTracks({ limit: 1000 })); // Get all tracks for stats
 
   if (isLoading) {
     return (
@@ -49,7 +49,8 @@ export default function Dashboard() {
     );
   }
 
-  const stats = tracks ? {
+  const tracks = tracksData?.tracks || [];
+  const stats = tracks.length > 0 ? {
     total: tracks.length,
     withLyrics: tracks.filter(t => t.has_lyrics).length,
     withoutLyrics: tracks.filter(t => !t.has_lyrics).length,
@@ -130,7 +131,7 @@ export default function Dashboard() {
   const completionRate = stats.total > 0 ? (stats.withLyrics / stats.total) * 100 : 0;
 
   return (
-    <Box sx={{ flexGrow: 1, p: 3 }}>
+    <Box sx={{ flexGrow: 1, p: { xs: 0, sm: 1, md: 3 } }}>
       {/* Header */}
       <Box sx={{ mb: 4 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>

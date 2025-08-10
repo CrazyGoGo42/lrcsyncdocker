@@ -61,7 +61,7 @@ const apiService = {
   getScanStats: () => api.get('/scan/stats'),
 
   // Tracks
-  getTracks: (params = {}) => api.get('/tracks', { params }).then(response => response.data.tracks),
+  getTracks: (params = {}) => api.get('/tracks', { params }).then(response => response.data),
   getTrack: (id) => api.get(`/tracks/${id}`),
   getArtists: () => api.get('/tracks/filters/artists'),
   getAlbums: (artist = null) => api.get('/tracks/filters/albums', { 

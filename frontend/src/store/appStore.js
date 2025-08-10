@@ -13,6 +13,18 @@ export const useAppStore = create(
       // Currently playing track
       currentTrack: null,
       
+      // Queue system
+      queue: [],
+      currentQueueIndex: -1,
+      shuffle: false,
+      repeat: 'off', // 'off', 'all', 'one'
+      
+      // Audio playback state
+      isPlaying: false,
+      currentTime: 0,
+      duration: 0,
+      volume: 1,
+      
       // Current scan/job status
       currentScanJob: null,
       scanProgress: 0,
@@ -50,6 +62,78 @@ export const useAppStore = create(
       
       clearCurrentTrack: () => set({ currentTrack: null }),
       
+      // Queue management actions
+      setQueue: (tracks) => set({ queue: tracks, currentQueueIndex: 0 }),
+      
+      addToQueue: (track) => set((state) => ({ 
+        queue: [...state.queue, track] 
+      })),
+      
+      removeFromQueue: (index) => set((state) => ({
+        queue: state.queue.filter((_, i) => i !== index),
+        currentQueueIndex: state.currentQueueIndex > index 
+          ? state.currentQueueIndex - 1 
+          : state.currentQueueIndex
+      })),
+      
+      playTrackFromQueue: (index) => set((state) => ({
+        currentTrack: state.queue[index],
+        currentQueueIndex: index,
+        isPlaying: true
+      })),
+      
+      nextTrack: () => set((state) => {
+        const nextIndex = state.currentQueueIndex + 1;
+        if (nextIndex < state.queue.length) {
+          return {
+            currentTrack: state.queue[nextIndex],
+            currentQueueIndex: nextIndex,
+            currentTime: 0
+          };
+        } else if (state.repeat === 'all') {
+          return {
+            currentTrack: state.queue[0],
+            currentQueueIndex: 0,
+            currentTime: 0
+          };
+        }
+        return {};
+      }),
+      
+      previousTrack: () => set((state) => {
+        const prevIndex = state.currentQueueIndex - 1;
+        if (prevIndex >= 0) {
+          return {
+            currentTrack: state.queue[prevIndex],
+            currentQueueIndex: prevIndex,
+            currentTime: 0
+          };
+        } else if (state.repeat === 'all') {
+          const lastIndex = state.queue.length - 1;
+          return {
+            currentTrack: state.queue[lastIndex],
+            currentQueueIndex: lastIndex,
+            currentTime: 0
+          };
+        }
+        return {};
+      }),
+      
+      setShuffle: (shuffle) => set({ shuffle }),
+      
+      setRepeat: (repeat) => set({ repeat }),
+      
+      // Audio playback actions
+      setIsPlaying: (playing) => set({ isPlaying: playing }),
+      
+      setCurrentTime: (time) => set({ currentTime: time }),
+      
+      setDuration: (duration) => set({ duration: duration }),
+      
+      setVolume: (volume) => set({ volume: volume }),
+      
+      togglePlayback: () => set((state) => ({ isPlaying: !state.isPlaying })),
+      
       toggleTrackSelection: (trackId) => set((state) => {
         const isSelected = state.selectedTracks.includes(trackId);
         return {
@@ -82,7 +166,13 @@ export const useAppStore = create(
       name: 'lyrics-sync-app-store',
       partialize: (state) => ({
         sidebarOpen: state.sidebarOpen,
-        libraryFilters: state.libraryFilters
+        libraryFilters: state.libraryFilters,
+        currentTrack: state.currentTrack,
+        queue: state.queue,
+        currentQueueIndex: state.currentQueueIndex,
+        shuffle: state.shuffle,
+        repeat: state.repeat,
+        volume: state.volume
       })
     }
   )

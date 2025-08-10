@@ -54,23 +54,18 @@ class MusicScanner {
   async scanDirectory(directory = null) {
     const scanDir = directory || this.musicPath;
     
-    console.log(`🎵 Starting music scan of: ${scanDir}`);
-    
     try {
       // Check if directory exists
       await fs.access(scanDir);
       
       // Get scanner settings
       const settings = await this.getSettings();
-      console.log(`📂 Scanner settings:`, settings);
       
       // Step 1: Find all music files that match our criteria
       const musicFiles = await this.findMusicFiles(scanDir, settings);
-      console.log(`🎵 Found ${musicFiles.length} music files to process`);
       
       // Step 2: Clean up database - remove files that no longer exist or don't match filters
       const cleanupResult = await this.cleanupDatabase(scanDir, musicFiles, settings);
-      console.log(`🧹 Cleanup result:`, cleanupResult);
       
       // Step 3: Process found files
       const processResult = await this.processFiles(musicFiles);
@@ -443,6 +438,14 @@ class MusicScanner {
         console.log(`⚠️ Could not extract duration from ${path.basename(filePath)}`);
       }
       
+      // Check for folder artwork
+      if (!metadata.artwork) {
+        const folderArtwork = await this.findFolderArtwork(filePath);
+        if (folderArtwork) {
+          metadata.artwork = folderArtwork;
+        }
+      }
+      
       return metadata;
     }
 
@@ -450,7 +453,7 @@ class MusicScanner {
     try {
       const { parseFile } = await import('music-metadata');
       const audioMetadata = await parseFile(filePath, {
-        skipCovers: true,
+        skipCovers: false, // Enable cover extraction
         skipPostHeaders: true,
         includeChapters: false,
         mergeTagHeaders: true
@@ -470,11 +473,31 @@ class MusicScanner {
           albumArtist: common.albumartist || null
         };
         
+        // Extract and cache album artwork if present
+        if (audioMetadata.common?.picture?.length > 0) {
+          const artwork = audioMetadata.common.picture[0];
+          if (artwork.data && artwork.data.length > 0) {
+            const artworkPath = await this.saveAlbumArtwork(filePath, artwork);
+            if (artworkPath) {
+              metadata.artwork = artworkPath;
+            }
+          }
+        }
+        
+        // Check for folder artwork if no embedded artwork was found
+        if (!metadata.artwork) {
+          const folderArtwork = await this.findFolderArtwork(filePath);
+          if (folderArtwork) {
+            metadata.artwork = folderArtwork;
+          }
+        }
+        
         console.log(`🎵 Extracted music-metadata from: ${path.basename(filePath)}:`, {
           title: metadata.title,
           artist: metadata.artist,
           album: metadata.album,
-          duration: metadata.duration
+          duration: metadata.duration,
+          hasArtwork: !!metadata.artwork
         });
         
         return metadata;
@@ -527,12 +550,21 @@ class MusicScanner {
       metadata.artist = 'ABBA';
     }
     
+    // Check for folder artwork if no embedded artwork was found
+    if (!metadata.artwork) {
+      const folderArtwork = await this.findFolderArtwork(filePath);
+      if (folderArtwork) {
+        metadata.artwork = folderArtwork;
+      }
+    }
+    
     console.log(`📂 Final metadata for: ${path.basename(filePath)}:`, {
       title: metadata.title,
       artist: metadata.artist,
       album: metadata.album,
       track: metadata.track,
-      year: metadata.year
+      year: metadata.year,
+      hasArtwork: !!metadata.artwork
     });
 
     return metadata;
@@ -629,6 +661,64 @@ class MusicScanner {
       return null;
     } catch (error) {
       console.error(`❌ Failed to save album artwork for ${filePath}:`, error);
+      return null;
+    }
+  }
+
+  async findFolderArtwork(filePath) {
+    try {
+      const directory = path.dirname(filePath);
+      console.log(`🔍 Looking for folder artwork in: ${directory}`);
+      
+      // Common folder artwork filenames
+      const folderArtworkNames = [
+        'folder.jpg',
+        'folder.jpeg', 
+        'folder.png',
+        'cover.jpg',
+        'cover.jpeg',
+        'cover.png',
+        'album.jpg',
+        'album.jpeg',
+        'album.png',
+        'albumart.jpg',
+        'albumart.jpeg',
+        'albumart.png',
+        'front.jpg',
+        'front.jpeg',
+        'front.png'
+      ];
+      
+      for (const artworkName of folderArtworkNames) {
+        const artworkPath = path.join(directory, artworkName);
+        
+        try {
+          // Check if file exists
+          await fs.access(artworkPath);
+          console.log(`✅ Found ${artworkName} - reading and caching...`);
+          
+          // Read and cache the folder artwork
+          const artworkData = await fs.readFile(artworkPath);
+          console.log(`📖 Read ${artworkData.length} bytes from ${artworkName}`);
+          const extension = path.extname(artworkName).substring(1);
+          const cachedPath = await cacheService.setCachedArtwork(artworkData, extension);
+          
+          if (cachedPath) {
+            console.log(`🖼️ Found and cached folder artwork: ${artworkName} for ${path.basename(filePath)}`);
+            return cachedPath;
+          } else {
+            console.log(`❌ Failed to cache artwork from ${artworkName}`);
+          }
+        } catch (error) {
+          // File doesn't exist, continue to next
+          console.log(`⏭️ ${artworkName} not found, trying next...`);
+          continue;
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      console.error(`❌ Error finding folder artwork for ${filePath}:`, error);
       return null;
     }
   }

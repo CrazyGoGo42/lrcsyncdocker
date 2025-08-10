@@ -59,7 +59,7 @@ export default function Scanner() {
   };
 
   return (
-    <Box sx={{ flexGrow: 1, p: 3 }}>
+    <Box sx={{ flexGrow: 1, p: { xs: 0, sm: 1, md: 3 } }}>
       <Typography variant="h4" gutterBottom>
         Music Scanner
       </Typography>

@@ -287,7 +287,7 @@ export default function Settings() {
 
   if (error) {
     return (
-      <Box sx={{ flexGrow: 1, p: 3 }}>
+      <Box sx={{ flexGrow: 1, p: { xs: 0, sm: 1, md: 3 } }}>
         <Typography variant="h4" gutterBottom>
           Settings
         </Typography>
@@ -352,7 +352,7 @@ export default function Settings() {
   });
 
   return (
-    <Box sx={{ flexGrow: 1, p: 3 }}>
+    <Box sx={{ flexGrow: 1, p: { xs: 0, sm: 1, md: 3 } }}>
       <Box display="flex" alignItems="center" mb={3}>
         <SettingsIcon sx={{ mr: 2 }} />
         <Typography variant="h4">

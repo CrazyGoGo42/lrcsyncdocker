@@ -57,7 +57,6 @@ const SyncedLyricsViewer = ({
 }) => {
   const theme = useTheme();
   const [activeLine, setActiveLine] = useState(-1);
-  const [nextLine, setNextLine] = useState(-1);
 
   // Parse lyrics content
   const { lyrics, metadata } = useMemo(() => {
@@ -84,16 +83,14 @@ const SyncedLyricsViewer = ({
     return lyricsContent && lyricsContent.includes('[') && lyricsContent.match(/\[\d{2}:\d{2}\.\d{2,3}\]/);
   }, [lyricsContent]);
 
-  // Find current and next lines based on current time
+  // Find current line based on current time
   useEffect(() => {
     if (!lyrics.length || !isSyncedLyrics) {
       setActiveLine(-1);
-      setNextLine(-1);
       return;
     }
 
     let currentLineIndex = -1;
-    let nextLineIndex = -1;
 
     // Find the current line (last line whose time has passed)
     for (let i = lyrics.length - 1; i >= 0; i--) {
@@ -103,16 +100,7 @@ const SyncedLyricsViewer = ({
       }
     }
 
-    // Find the next line
-    for (let i = 0; i < lyrics.length; i++) {
-      if (currentTime < lyrics[i].time) {
-        nextLineIndex = i;
-        break;
-      }
-    }
-
     setActiveLine(currentLineIndex);
-    setNextLine(nextLineIndex);
   }, [currentTime, lyrics, isSyncedLyrics]);
 
   const handleLineClick = useCallback((lineTime) => {
@@ -209,7 +197,6 @@ const SyncedLyricsViewer = ({
         }}>
           {lyrics.map((line, index) => {
             const isActive = isSyncedLyrics && index === activeLine;
-            const isNext = isSyncedLyrics && index === nextLine;
             const isPast = isSyncedLyrics && index < activeLine;
             
             return (
@@ -227,13 +214,9 @@ const SyncedLyricsViewer = ({
                     transition: 'all 0.3s ease',
                     backgroundColor: isActive 
                       ? theme.palette.primary.main + '20'
-                      : isNext
-                      ? theme.palette.warning.main + '10'
                       : 'transparent',
                     borderLeft: isActive 
                       ? `4px solid ${theme.palette.primary.main}`
-                      : isNext
-                      ? `4px solid ${theme.palette.warning.main}`
                       : '4px solid transparent',
                     opacity: isPast && isSyncedLyrics ? 0.6 : 1,
                     transform: isActive ? 'scale(1.02)' : 'scale(1)',

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Howl, Howler } from 'howler';
+import { useAppStore } from '../store/appStore';
 import {
   Box,
   Paper,
@@ -30,13 +31,31 @@ const AudioPlayer = ({
   autoplay = false
 }) => {
   const theme = useTheme();
-  const [isPlaying, setIsPlaying] = useState(false);
+  
+  // Use shared state for playback
+  const { 
+    isPlaying, 
+    currentTime, 
+    duration: storeDuration,
+    volume: storeVolume,
+    setIsPlaying, 
+    setCurrentTime, 
+    setDuration, 
+    setVolume,
+    nextTrack,
+    queue,
+    currentQueueIndex,
+    repeat
+  } = useAppStore();
+  
+  // Keep local state for loading, mute, and error
   const [isLoading, setIsLoading] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [volume, setVolume] = useState(0.8);
   const [isMuted, setIsMuted] = useState(false);
   const [error, setError] = useState(null);
+  
+  // Use shared state or fallback to defaults
+  const duration = storeDuration || 0;
+  const volume = storeVolume || 0.8;
 
   const howlRef = useRef(null);
   const intervalRef = useRef(null);
@@ -170,13 +189,25 @@ const AudioPlayer = ({
         setIsPlaying(false);
       },
       onend: () => {
-        setIsPlaying(false);
-        setCurrentTime(0);
-        onStop?.();
+        // Handle track end - auto-advance or stop
+        if (repeat === 'one') {
+          // Repeat current track
+          howlRef.current.seek(0);
+          howlRef.current.play();
+          setCurrentTime(0);
+        } else if (queue.length > 1 && (currentQueueIndex < queue.length - 1 || repeat === 'all')) {
+          // Auto-play next track
+          nextTrack();
+        } else {
+          // Stop playback
+          setIsPlaying(false);
+          setCurrentTime(0);
+          onStop?.();
+        }
       }
     });
 
-  }, [track?.id, track?.filename, volume, isMuted, checkCodecSupport]);
+  }, [track?.id, track?.filename, checkCodecSupport]);
 
   // Handle external seek requests
   useEffect(() => {
@@ -300,7 +331,7 @@ const AudioPlayer = ({
           >
             {track.artwork_path ? (
               <img
-                src={track.artwork_path}
+                src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/cache/artwork/${track.artwork_path.split('/').pop()}?v=${Date.now()}`}
                 alt={`${track.album} artwork`}
                 style={{
                   width: '100%',

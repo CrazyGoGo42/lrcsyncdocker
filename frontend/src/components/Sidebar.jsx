@@ -12,6 +12,8 @@ import {
   Typography,
   Chip,
   alpha,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import {
   Dashboard as DashboardIcon,
@@ -21,7 +23,8 @@ import {
   MusicNote as MusicNoteIcon,
   PlayArrow as PlayIcon,
 } from '@mui/icons-material';
-import { useTheme } from '../contexts/ThemeContext';
+import { useTheme as useCustomTheme } from '../contexts/ThemeContext';
+import { useAppStore } from '../store/appStore';
 
 const drawerWidth = 240;
 
@@ -36,7 +39,10 @@ const navigationItems = [
 export default function Sidebar({ open }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { mode } = useTheme();
+  const { mode } = useCustomTheme();
+  const { setSidebarOpen } = useAppStore();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
   return (
     <Drawer
@@ -95,7 +101,13 @@ export default function Sidebar({ open }) {
             <ListItem key={item.title} disablePadding sx={{ mb: 0.5 }}>
               <ListItemButton
                 selected={location.pathname === item.path}
-                onClick={() => navigate(item.path)}
+                onClick={() => {
+                  navigate(item.path);
+                  // Close sidebar on mobile after navigation
+                  if (isMobile) {
+                    setSidebarOpen(false);
+                  }
+                }}
                 sx={{
                   borderRadius: 2,
                   py: 1.5,

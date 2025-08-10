@@ -108,12 +108,34 @@ class CacheService {
   async setCachedArtwork(artworkData, format = 'jpg') {
     try {
       const artworkHash = crypto.createHash('md5').update(artworkData).digest('hex');
-      const artworkFile = path.join(this.artworkPath, `${artworkHash}.${format}`);
+      const artworkFile = path.join(this.artworkPath, `${artworkHash}.jpg`); // Always save as JPG for consistency
       
-      await fs.writeFile(artworkFile, artworkData);
-      console.log(`🎨 Cached artwork: ${artworkHash}.${format}`);
-      
-      return `/cache/artwork/${artworkHash}.${format}`;
+      // Resize and optimize the image to max 300x300 for web display
+      try {
+        const sharp = require('sharp');
+        const optimizedImage = await sharp(artworkData)
+          .resize(300, 300, {
+            fit: 'cover',
+            position: 'centre'
+          })
+          .jpeg({ 
+            quality: 85, 
+            progressive: true 
+          })
+          .toBuffer();
+        
+        await fs.writeFile(artworkFile, optimizedImage);
+        console.log(`🎨 Cached optimized artwork: ${artworkHash}.jpg`);
+        
+        return `/cache/artwork/${artworkHash}.jpg`;
+      } catch (sharpError) {
+        // Fallback: save original image if Sharp processing fails
+        console.warn('⚠️ Sharp processing failed, saving original:', sharpError.message);
+        await fs.writeFile(artworkFile, artworkData);
+        console.log(`🎨 Cached artwork (original): ${artworkHash}.jpg`);
+        
+        return `/cache/artwork/${artworkHash}.jpg`;
+      }
     } catch (error) {
       console.warn('⚠️ Failed to cache artwork:', error.message);
       return null;

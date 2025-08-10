@@ -62,17 +62,20 @@ export default function Library() {
   const [lyricsSearchOpen, setLyricsSearchOpen] = useState(false);
   const [trackForSearch, setTrackForSearch] = useState(null);
   
-  const { selectedTracks, toggleTrackSelection, clearSelectedTracks, setSelectedTracks, setCurrentTrack } = useAppStore();
+  const { selectedTracks, toggleTrackSelection, clearSelectedTracks, setSelectedTracks, setCurrentTrack, setQueue } = useAppStore();
   const queryClient = useQueryClient();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const navigate = useNavigate();
 
-  const { data: tracks = [], isLoading, error } = useQuery(
+  const { data: tracksData = { tracks: [], pagination: { total: 0 } }, isLoading, error } = useQuery(
     ['tracks', { search: searchTerm, page, limit: rowsPerPage }],
     () => getTracks({ search: searchTerm, page: page + 1, limit: rowsPerPage }),
     { keepPreviousData: true }
   );
+
+  const tracks = tracksData.tracks || [];
+  const totalTracks = tracksData.pagination?.total || 0;
 
   const { data: settings } = useQuery('settings', getSettings);
 
@@ -91,7 +94,7 @@ export default function Library() {
     }
   );
 
-  // Remove client-side filtering since server already handles it
+  // Use server-side pagination - no client-side filtering needed
   const filteredTracks = tracks;
 
   const handleSelectAllClick = (event) => {
@@ -130,8 +133,17 @@ export default function Library() {
   };
 
   const handlePlayTrack = (track) => {
-    // Set the current playing track and navigate to Now Playing
+    // Set the current playing track and create a queue from all tracks
     setCurrentTrack(track);
+    
+    // Create queue from current page of tracks, with clicked track at current position
+    if (tracksData?.tracks) {
+      const trackIndex = tracksData.tracks.findIndex(t => t.id === track.id);
+      setQueue(tracksData.tracks);
+      // Update currentQueueIndex in store via playTrackFromQueue
+      useAppStore.getState().playTrackFromQueue(trackIndex);
+    }
+    
     navigate('/now-playing');
   };
 
@@ -144,7 +156,7 @@ export default function Library() {
   }
 
   return (
-    <Box sx={{ flexGrow: 1, p: 3 }}>
+    <Box sx={{ flexGrow: 1, p: { xs: 0, sm: 1, md: 3 } }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
         <LibraryMusicIcon sx={{ mr: 2, fontSize: 32, color: 'primary.main' }} />
         <Typography variant="h4" sx={{ fontWeight: 700 }}>
@@ -233,12 +245,42 @@ export default function Library() {
                       }}
                     >
                       <CardContent sx={{ pb: 1 }}>
-                        <Box display="flex" alignItems="flex-start" gap={1}>
+                        <Box display="flex" alignItems="flex-start" gap={2}>
                           <Checkbox
                             checked={selectedTracks.includes(track.id)}
                             onChange={() => toggleTrackSelection(track.id)}
                             size="small"
                           />
+                          
+                          {/* Album artwork for mobile */}
+                          <Box
+                            sx={{
+                              width: 48,
+                              height: 48,
+                              borderRadius: 1.5,
+                              overflow: 'hidden',
+                              flexShrink: 0,
+                              backgroundColor: 'grey.200',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            {track.artwork_path ? (
+                              <img
+                                src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/cache/artwork/${track.artwork_path.split('/').pop()}`}
+                                alt={`${track.album} artwork`}
+                                style={{
+                                  width: '100%',
+                                  height: '100%',
+                                  objectFit: 'cover',
+                                }}
+                              />
+                            ) : (
+                              <MusicNoteIcon sx={{ fontSize: 24, color: 'grey.500' }} />
+                            )}
+                          </Box>
+
                           <Box flex={1} minWidth={0}>
                             <Typography variant="subtitle1" sx={{ fontWeight: 600 }} noWrap>
                               {track.title}
@@ -335,7 +377,7 @@ export default function Library() {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredTracks.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((track) => {
+                filteredTracks.map((track) => {
                   const isItemSelected = isSelected(track.id);
                   return (
                     <TableRow key={track.id} hover selected={isItemSelected}>
@@ -415,7 +457,7 @@ export default function Library() {
         {/* Pagination */}
         <TablePagination
           component="div"
-          count={filteredTracks.length}
+          count={totalTracks}
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={(event, newPage) => setPage(newPage)}

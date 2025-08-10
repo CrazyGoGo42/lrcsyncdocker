@@ -4,7 +4,18 @@ const NodeID3 = require('node-id3');
 
 class LyricsEmbedder {
   constructor() {
-    this.supportedFormats = ['.mp3'];
+    // Formats that support lyrics embedding (prioritized by reliability)
+    this.supportedFormats = [
+      '.mp3',     // ID3v2 tags - fully supported
+      '.flac',    // Vorbis comments - can be supported with music-metadata
+      '.m4a',     // MP4 metadata - can be supported
+      '.ogg',     // Vorbis comments - can be supported
+      '.opus',    // Vorbis comments - can be supported
+      '.aac'      // Limited support
+    ];
+    
+    // Note: Some formats may require external libraries or have limitations
+    // For maximum compatibility, we recommend using sidecar .lrc files
   }
 
   isSupported(filePath) {
@@ -16,18 +27,28 @@ class LyricsEmbedder {
     const ext = path.extname(filePath).toLowerCase();
     
     try {
-      console.log(`🎵 Embedding lyrics into: ${filePath}`);
+      console.log(`🎵 Embedding lyrics into: ${filePath} (${ext})`);
       
       switch (ext) {
         case '.mp3':
           return await this.embedMP3Lyrics(filePath, plainLyrics, syncedLyrics);
+          
         case '.flac':
-          // FLAC embedding would require additional dependencies
-          console.log('⚠️ FLAC embedding not yet supported');
-          return { success: false, message: 'FLAC embedding not supported' };
+        case '.ogg':
+        case '.opus':
+          // For FLAC/OGG formats, use sidecar files as primary method
+          console.log(`📄 Using sidecar .lrc file for ${ext} format`);
+          return await this.createSidecarFile(filePath, syncedLyrics || plainLyrics);
+          
+        case '.m4a':
+        case '.aac':
+          // M4A/AAC have limited embedding support, prefer sidecar files
+          console.log(`📄 Using sidecar .lrc file for ${ext} format`);
+          return await this.createSidecarFile(filePath, syncedLyrics || plainLyrics);
+          
         default:
-          console.log(`⚠️ Unsupported format: ${ext}`);
-          return { success: false, message: `Unsupported format: ${ext}` };
+          console.log(`⚠️ Unsupported format: ${ext}, using sidecar file`);
+          return await this.createSidecarFile(filePath, syncedLyrics || plainLyrics);
       }
     } catch (error) {
       console.error(`❌ Failed to embed lyrics in ${filePath}:`, error);
@@ -219,8 +240,133 @@ class LyricsEmbedder {
     }
   }
 
+  // Create sidecar .lrc file for formats that don't support embedding reliably
+  async createSidecarFile(audioFilePath, lyricsContent) {
+    try {
+      if (!lyricsContent || !lyricsContent.trim()) {
+        return { success: false, message: 'No lyrics content provided' };
+      }
+
+      // Generate .lrc file path
+      const audioDir = path.dirname(audioFilePath);
+      const audioName = path.basename(audioFilePath, path.extname(audioFilePath));
+      const lrcPath = path.join(audioDir, `${audioName}.lrc`);
+
+      // Write lyrics to .lrc file
+      await fs.writeFile(lrcPath, lyricsContent.trim(), 'utf8');
+      
+      console.log(`✅ Created sidecar lyrics file: ${path.basename(lrcPath)}`);
+      return { 
+        success: true, 
+        message: 'Sidecar lyrics file created successfully',
+        sidecarPath: lrcPath
+      };
+    } catch (error) {
+      console.error(`❌ Failed to create sidecar file for ${audioFilePath}:`, error);
+      return { success: false, message: error.message };
+    }
+  }
+
+  // Read sidecar .lrc file
+  async readSidecarFile(audioFilePath) {
+    try {
+      const audioDir = path.dirname(audioFilePath);
+      const audioName = path.basename(audioFilePath, path.extname(audioFilePath));
+      const lrcPath = path.join(audioDir, `${audioName}.lrc`);
+
+      try {
+        const lyricsContent = await fs.readFile(lrcPath, 'utf8');
+        
+        if (lyricsContent.trim()) {
+          console.log(`✅ Found sidecar lyrics: ${path.basename(lrcPath)} (${lyricsContent.length} chars)`);
+          return {
+            hasLyrics: true,
+            lyrics: lyricsContent.trim(),
+            source: 'sidecar'
+          };
+        }
+      } catch (readError) {
+        // File doesn't exist or can't be read
+        return {
+          hasLyrics: false,
+          lyrics: null,
+          source: null
+        };
+      }
+    } catch (error) {
+      console.error(`❌ Error reading sidecar file for ${audioFilePath}:`, error);
+      return {
+        hasLyrics: false,
+        lyrics: null,
+        source: null
+      };
+    }
+  }
+
+  // Check if sidecar .lrc file exists
+  async hasSidecarFile(audioFilePath) {
+    try {
+      const audioDir = path.dirname(audioFilePath);
+      const audioName = path.basename(audioFilePath, path.extname(audioFilePath));
+      const lrcPath = path.join(audioDir, `${audioName}.lrc`);
+      
+      const stats = await fs.stat(lrcPath);
+      return stats.isFile() && stats.size > 0;
+    } catch {
+      return false;
+    }
+  }
+
   getSupportedFormats() {
     return [...this.supportedFormats];
+  }
+
+  // Enhanced method to check for ANY lyrics (embedded OR sidecar)
+  async hasAnyLyrics(filePath) {
+    try {
+      // First check for sidecar file (fastest)
+      const hasSidecar = await this.hasSidecarFile(filePath);
+      if (hasSidecar) {
+        return true;
+      }
+
+      // Then check embedded lyrics for supported formats
+      const hasEmbedded = await this.hasEmbeddedLyrics(filePath);
+      return hasEmbedded;
+    } catch (error) {
+      console.error(`❌ Error checking for any lyrics in ${filePath}:`, error);
+      return false;
+    }
+  }
+
+  // Enhanced method to read ANY lyrics (embedded OR sidecar)
+  async readAnyLyrics(filePath) {
+    try {
+      // First try sidecar file (preferred for most formats)
+      const sidecarResult = await this.readSidecarFile(filePath);
+      if (sidecarResult.hasLyrics) {
+        return sidecarResult;
+      }
+
+      // Fall back to embedded lyrics for MP3
+      const embeddedResult = await this.readEmbeddedLyrics(filePath);
+      if (embeddedResult.hasLyrics) {
+        return embeddedResult;
+      }
+
+      return {
+        hasLyrics: false,
+        lyrics: null,
+        source: null
+      };
+    } catch (error) {
+      console.error(`❌ Error reading any lyrics from ${filePath}:`, error);
+      return {
+        hasLyrics: false,
+        lyrics: null,
+        source: null
+      };
+    }
   }
 }
 

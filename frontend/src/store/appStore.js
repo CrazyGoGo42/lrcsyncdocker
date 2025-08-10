@@ -10,6 +10,9 @@ export const useAppStore = create(
       // Selected tracks for bulk operations
       selectedTracks: [],
       
+      // Currently playing track
+      currentTrack: null,
+      
       // Current scan/job status
       currentScanJob: null,
       scanProgress: 0,
@@ -42,6 +45,10 @@ export const useAppStore = create(
       })),
       
       clearSelectedTracks: () => set({ selectedTracks: [] }),
+      
+      setCurrentTrack: (track) => set({ currentTrack: track }),
+      
+      clearCurrentTrack: () => set({ currentTrack: null }),
       
       toggleTrackSelection: (trackId) => set((state) => {
         const isSelected = state.selectedTracks.includes(trackId);

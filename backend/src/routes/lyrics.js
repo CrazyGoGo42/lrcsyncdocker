@@ -42,72 +42,39 @@ router.get('/track/:trackId', async (req, res) => {
   try {
     const { trackId } = req.params;
     
-    console.log(`🎵 Getting lyrics for track ID: ${trackId}`);
-    
     // Get track info
     const trackResult = await query('SELECT * FROM tracks WHERE id = $1', [trackId]);
     if (trackResult.rows.length === 0) {
-      console.log(`❌ Track not found: ${trackId}`);
       return res.status(404).json({ error: 'Track not found' });
     }
     
     const track = trackResult.rows[0];
-    console.log(`📀 Track: ${track.artist} - ${track.title} (has_lyrics: ${track.has_lyrics})`);
-    console.log(`📁 File path: ${track.file_path}`);
     
-    // Check if LRC file exists first
-    const lrcPath = track.file_path.replace(/\.[^/.]+$/, '.lrc');
-    console.log(`🔍 Checking for LRC file: ${lrcPath}`);
-    
+    // Use enhanced lyrics reading (checks sidecar files AND embedded)
     try {
-      const lrcContent = await fs.readFile(lrcPath, 'utf8');
-      console.log(`✅ Found LRC file for: ${track.title}`);
-      res.json({
-        hasLyrics: true,
-        lyrics: lrcContent,
-        source: 'local',
-        filePath: lrcPath
-      });
-      return;
-    } catch (lrcError) {
-      console.log(`📂 No .lrc file found for ${track.title} (${lrcError.code}), checking embedded lyrics...`);
-    }
-    
-    // Check for embedded lyrics
-    try {
-      console.log(`🔍 Checking embedded lyrics in: ${track.file_path}`);
-      const embeddedResult = await lyricsEmbedder.readEmbeddedLyrics(track.file_path);
+      const lyricsResult = await lyricsEmbedder.readAnyLyrics(track.file_path);
       
-      console.log(`🎵 Embedded lyrics result:`, {
-        hasLyrics: embeddedResult.hasLyrics,
-        lyricsLength: embeddedResult.lyrics?.length || 0,
-        source: embeddedResult.source
-      });
-      
-      if (embeddedResult.hasLyrics && embeddedResult.lyrics) {
-        console.log(`✅ Found embedded lyrics for: ${track.title}`);
+      if (lyricsResult.hasLyrics && lyricsResult.lyrics) {
         res.json({
           hasLyrics: true,
-          lyrics: embeddedResult.lyrics,
-          source: 'embedded',
+          lyrics: lyricsResult.lyrics,
+          source: lyricsResult.source,
           filePath: track.file_path
         });
       } else {
-        console.log(`❌ No embedded lyrics found for: ${track.title}`);
         res.json({
           hasLyrics: false,
           lyrics: null,
           source: null,
-          filePath: lrcPath
+          filePath: track.file_path
         });
       }
     } catch (embeddedError) {
-      console.error(`❌ Error reading embedded lyrics for ${track.title}:`, embeddedError);
       res.json({
         hasLyrics: false,
         lyrics: null,
         source: null,
-        filePath: lrcPath,
+        filePath: track.file_path,
         error: embeddedError.message
       });
     }
@@ -125,8 +92,6 @@ router.get('/track/:trackId', async (req, res) => {
 router.get('/debug/:trackId', async (req, res) => {
   try {
     const { trackId } = req.params;
-    
-    console.log(`🔧 DEBUGGING: Track ID ${trackId}`);
     
     // Get track info
     const trackResult = await query('SELECT * FROM tracks WHERE id = $1', [trackId]);
@@ -181,7 +146,6 @@ router.get('/debug/:trackId', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Debug error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -255,18 +219,12 @@ router.post('/save', async (req, res) => {
       lrcPath = track.file_path.replace(/\.[^/.]+$/, '.lrc');
       await fs.writeFile(lrcPath, lyrics, 'utf8');
       lrcSaved = true;
-      console.log(`📄 Saved LRC file: ${lrcPath}`);
     }
     
     if (storageMethod === 'embedded' || storageMethod === 'both') {
       if (lyricsEmbedder.isSupported(track.file_path)) {
         const embedResult = await lyricsEmbedder.embedLyrics(track.file_path, lyrics, lyrics);
         embeddedSaved = embedResult.success;
-        if (embeddedSaved) {
-          console.log(`🎵 Embedded lyrics into: ${track.file_path}`);
-        } else {
-          console.error(`❌ Failed to embed lyrics: ${embedResult.message}`);
-        }
       }
     }
     
@@ -287,7 +245,6 @@ router.post('/save', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Save lyrics error:', error);
     res.status(500).json({
       error: 'Failed to save lyrics',
       message: error.message
@@ -315,7 +272,6 @@ async function getSetting(key, defaultValue) {
         return value;
     }
   } catch (error) {
-    console.error(`Error getting setting ${key}:`, error);
     return defaultValue;
   }
 }
@@ -334,8 +290,6 @@ router.post('/bulk-download', async (req, res) => {
     // Get settings for lyrics processing
     const storageMethod = await getSetting('lyrics.storage_method', 'lrc_files');
     const overwriteExisting = await getSetting('lyrics.overwrite_existing', false);
-    
-    console.log(`🎵 Using storage method: ${storageMethod}`);
     
     // Determine what to save based on storage method
     let saveLrcFiles = false;
@@ -359,8 +313,6 @@ router.post('/bulk-download', async (req, res) => {
         saveEmbedded = false;
     }
     
-    console.log(`📄 Save LRC files: ${saveLrcFiles}, 🎵 Embed: ${saveEmbedded}`);
-    
     // Process directly without Redis
     const results = await processBulkLyricsDownloadDirect(trackIds, saveEmbedded, {
       saveLrcFiles,
@@ -374,7 +326,6 @@ router.post('/bulk-download', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Bulk lyrics download error:', error);
     res.status(500).json({
       error: 'Failed to process bulk lyrics download',
       message: error.message
@@ -393,13 +344,10 @@ async function searchLrclib(artist, title, album, duration) {
   // Check cache first
   const cachedResult = lyricsCache.get(cacheKey);
   if (cachedResult && Date.now() - cachedResult.timestamp < CACHE_DURATION) {
-    console.log(`💾 Using cached result for: ${artist} - ${title}`);
     return cachedResult.data;
   }
 
   try {
-    console.log(`🔍 LRCLIB Search - Artist: "${artist}", Title: "${title}", Album: "${album}", Duration: ${duration}`);
-    
     // Use /api/get endpoint like the original LRCGET implementation
     const params = new URLSearchParams({
       artist_name: artist,
@@ -410,7 +358,6 @@ async function searchLrclib(artist, title, album, duration) {
     if (duration) params.append('duration', Math.round(duration));
 
     const url = `https://lrclib.net/api/get?${params}`;
-    console.log(`📡 LRCLIB Request URL: ${url}`);
 
     const response = await axios.get(url, {
       timeout: 15000, // Increased timeout
@@ -418,8 +365,6 @@ async function searchLrclib(artist, title, album, duration) {
         'User-Agent': 'Lyrics-Sync-Web/1.0.0 (https://github.com/user/lyrics-sync-web)'
       }
     });
-
-    console.log(`📥 LRCLIB Response Status: ${response.status}`);
 
     // The /api/get endpoint returns a single object, not an array
     if (response.data && (response.data.syncedLyrics || response.data.plainLyrics)) {
@@ -431,7 +376,6 @@ async function searchLrclib(artist, title, album, duration) {
         timestamp: Date.now()
       });
       
-      console.log(`✅ Found lyrics for: ${artist} - ${title}`);
       return result;
     }
 
@@ -443,11 +387,8 @@ async function searchLrclib(artist, title, album, duration) {
 
     return [];
   } catch (error) {
-    console.error('LRCLIB search error:', error.message);
-    
     // If /api/get fails, try /api/search as fallback
     try {
-      console.log('🔄 Trying /api/search as fallback...');
       const searchParams = new URLSearchParams({
         artist_name: artist,
         track_name: title
@@ -457,7 +398,6 @@ async function searchLrclib(artist, title, album, duration) {
       if (duration) searchParams.append('duration', Math.round(duration));
 
       const searchUrl = `https://lrclib.net/api/search?${searchParams}`;
-      console.log(`📡 Fallback LRCLIB Search URL: ${searchUrl}`);
 
       const searchResponse = await axios.get(searchUrl, {
         timeout: 15000,
@@ -465,8 +405,6 @@ async function searchLrclib(artist, title, album, duration) {
           'User-Agent': 'Lyrics-Sync-Web/1.0.0 (https://github.com/user/lyrics-sync-web)'
         }
       });
-
-      console.log(`📥 Fallback Response Status: ${searchResponse.status}`);
       
       const searchData = searchResponse.data || [];
       
@@ -478,8 +416,6 @@ async function searchLrclib(artist, title, album, duration) {
 
       return searchData;
     } catch (fallbackError) {
-      console.error('Fallback search also failed:', fallbackError.message);
-      
       // Cache empty result to avoid repeated failed requests
       lyricsCache.set(cacheKey, {
         data: [],
@@ -549,7 +485,6 @@ async function processLyricsDownloadJob(jobId) {
     });
 
   } catch (error) {
-    console.error(`Lyrics download job ${jobId} failed:`, error);
     await updateJob(jobId, {
       status: 'failed',
       error: error.message,
@@ -568,8 +503,6 @@ async function processBulkLyricsDownloadDirect(trackIds, embedLyrics = false, op
     errors: []
   };
 
-  console.log(`🎵 Starting bulk lyrics download for ${trackIds.length} tracks`);
-
   for (let i = 0; i < trackIds.length; i++) {
     const trackId = trackIds[i];
     
@@ -583,8 +516,6 @@ async function processBulkLyricsDownloadDirect(trackIds, embedLyrics = false, op
         results.failed++;
         continue;
       }
-
-      console.log(`🔍 Searching lyrics for: ${track.artist} - ${track.title}`);
 
       // Search for lyrics
       const searchResults = await searchLrclib(track.artist, track.title, track.album, track.duration);
@@ -604,38 +535,26 @@ async function processBulkLyricsDownloadDirect(trackIds, embedLyrics = false, op
             try {
               await fs.access(lrcPath);
               if (!overwriteExisting) {
-                console.log(`⏭️ Skipping existing .lrc file: ${path.basename(lrcPath)}`);
+                // Skip existing file
               } else {
                 await fs.writeFile(lrcPath, lyricsContent, 'utf8');
                 lrcSaved = true;
-                console.log(`📄 Overwritten .lrc file: ${path.basename(lrcPath)}`);
               }
             } catch (error) {
               // File doesn't exist, create it
               await fs.writeFile(lrcPath, lyricsContent, 'utf8');
               lrcSaved = true;
-              console.log(`📄 Created .lrc file: ${path.basename(lrcPath)}`);
             }
           }
           
           // Embed lyrics if requested
           if (embedLyrics) {
-            console.log(`📝 Embedding lyrics for: ${track.title}`);
-            
             if (lyricsEmbedder.isSupported(track.file_path)) {
-              const embedResult = await lyricsEmbedder.embedLyrics(
+              await lyricsEmbedder.embedLyrics(
                 track.file_path,
                 bestMatch.plainLyrics,
                 bestMatch.syncedLyrics
               );
-              
-              if (embedResult.success) {
-                console.log(`✅ Lyrics embedded into: ${track.artist} - ${track.title}`);
-              } else {
-                console.log(`⚠️ Embedding failed for ${track.title}: ${embedResult.message}`);
-              }
-            } else {
-              console.log(`⚠️ File format not supported for embedding: ${path.extname(track.file_path)}`);
             }
           }
           
@@ -647,7 +566,6 @@ async function processBulkLyricsDownloadDirect(trackIds, embedLyrics = false, op
           `, [trackId]);
           
           results.successful++;
-          console.log(`✅ Lyrics saved for: ${track.artist} - ${track.title}`);
         } else {
           results.errors.push({ trackId, error: 'No lyrics content found' });
           results.failed++;
@@ -655,7 +573,6 @@ async function processBulkLyricsDownloadDirect(trackIds, embedLyrics = false, op
       } else {
         results.errors.push({ trackId, error: 'No lyrics found' });
         results.failed++;
-        console.log(`❌ No lyrics found for: ${track.artist} - ${track.title}`);
       }
       
       results.processed++;
@@ -664,11 +581,9 @@ async function processBulkLyricsDownloadDirect(trackIds, embedLyrics = false, op
       results.errors.push({ trackId, error: error.message });
       results.failed++;
       results.processed++;
-      console.error(`❌ Error processing track ${trackId}:`, error.message);
     }
   }
 
-  console.log(`🎉 Bulk lyrics download completed: ${results.successful} successful, ${results.failed} failed`);
   return results;
 }
 

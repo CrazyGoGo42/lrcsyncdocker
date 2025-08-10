@@ -262,16 +262,47 @@ router.get('/:trackId/audio', audioCorsMiddleware, async (req, res) => {
     const fileSize = stat.size;
     const range = req.headers.range;
     
-    // Determine MIME type based on file extension
+    // Determine MIME type based on file extension - comprehensive format support
     const ext = path.extname(filePath).toLowerCase();
     const mimeTypes = {
-      '.mp3': 'audio/mpeg',
+      // Lossless formats
       '.flac': 'audio/flac',
-      '.m4a': 'audio/mp4',
-      '.aac': 'audio/aac',
-      '.ogg': 'audio/ogg',
       '.wav': 'audio/wav',
-      '.wma': 'audio/x-ms-wma'
+      '.alac': 'audio/mp4',
+      '.ape': 'audio/x-monkeys-audio',
+      '.wv': 'audio/x-wavpack',
+      '.tak': 'audio/x-tak',
+      '.tta': 'audio/x-tta',
+      '.dsd': 'audio/dsd',
+      '.dsf': 'audio/x-dsf',
+      '.dff': 'audio/x-dff',
+      
+      // Lossy compressed formats
+      '.mp3': 'audio/mpeg',
+      '.aac': 'audio/aac',
+      '.m4a': 'audio/mp4',
+      '.ogg': 'audio/ogg',
+      '.oga': 'audio/ogg',
+      '.opus': 'audio/opus',
+      '.wma': 'audio/x-ms-wma',
+      '.mp4': 'audio/mp4',
+      '.3gp': 'audio/3gpp',
+      '.amr': 'audio/amr',
+      '.webm': 'audio/webm',
+      
+      // Legacy/Other formats
+      '.au': 'audio/basic',
+      '.snd': 'audio/basic',
+      '.aiff': 'audio/aiff',
+      '.aifc': 'audio/aiff',
+      '.ra': 'audio/vnd.rn-realaudio',
+      '.rm': 'audio/x-pn-realaudio',
+      '.ac3': 'audio/ac3',
+      '.dts': 'audio/vnd.dts',
+      '.mka': 'audio/x-matroska',
+      '.mpc': 'audio/x-musepack',
+      '.spx': 'audio/speex',
+      '.gsm': 'audio/gsm'
     };
     const mimeType = mimeTypes[ext] || 'audio/mpeg';
     

@@ -3,10 +3,51 @@ const path = require('path');
 const crypto = require('crypto');
 const { query } = require('../database');
 const lyricsEmbedder = require('./lyricsEmbedder');
+const cacheService = require('./cacheService');
 
 class MusicScanner {
   constructor() {
-    this.supportedFormats = ['.mp3', '.flac', '.m4a', '.aac', '.ogg', '.wav', '.wma'];
+    // Comprehensive audio format support for lyrics syncing
+    this.supportedFormats = [
+      // Lossless formats
+      '.flac',    // Free Lossless Audio Codec
+      '.wav',     // Waveform Audio File Format
+      '.alac',    // Apple Lossless Audio Codec
+      '.ape',     // Monkey's Audio
+      '.wv',      // WavPack
+      '.tak',     // Tom's lossless Audio Kompressor
+      '.tta',     // True Audio
+      '.dsd',     // Direct Stream Digital
+      '.dsf',     // DSD Stream File
+      '.dff',     // DSD Interchange File Format
+      
+      // Lossy compressed formats
+      '.mp3',     // MPEG-1/2 Audio Layer III
+      '.aac',     // Advanced Audio Coding
+      '.m4a',     // MPEG-4 Audio (AAC in MP4 container)
+      '.ogg',     // Ogg Vorbis
+      '.oga',     // Ogg Audio
+      '.opus',    // Opus codec
+      '.wma',     // Windows Media Audio
+      '.mp4',     // MPEG-4 Audio
+      '.3gp',     // 3GPP Audio
+      '.amr',     // Adaptive Multi-Rate
+      '.webm',    // WebM Audio
+      
+      // Legacy/Other formats
+      '.au',      // Sun/NeXT Audio
+      '.snd',     // Sound file
+      '.aiff',    // Audio Interchange File Format
+      '.aifc',    // AIFF Compressed
+      '.ra',      // RealAudio
+      '.rm',      // RealMedia
+      '.ac3',     // Audio Codec 3
+      '.dts',     // DTS Coherent Acoustics
+      '.mka',     // Matroska Audio
+      '.mpc',     // Musepack
+      '.spx',     // Speex
+      '.gsm'      // GSM Audio
+    ];
     this.musicPath = process.env.MUSIC_PATH || '/app/music';
   }
 
@@ -330,7 +371,15 @@ class MusicScanner {
   }
 
   async extractTrackData(filePath, stats, fileHash) {
-    const metadata = await this.extractMetadata(filePath);
+    // Try to get cached metadata first
+    let metadata = await cacheService.getCachedMetadata(filePath, stats);
+    
+    if (!metadata) {
+      // Cache miss - extract metadata and cache it
+      metadata = await this.extractMetadata(filePath);
+      await cacheService.setCachedMetadata(filePath, stats, metadata);
+    }
+    
     const hasLyrics = await this.checkForAnyLyrics(filePath);
     
     return {
@@ -463,59 +512,28 @@ class MusicScanner {
       console.log(`⚠️ ID3 extraction failed for ${filePath}:`, id3Error.message);
     }
 
-    // Method 4: Parse album from parent directory and track info from filename
-    try {
-      const parentDir = path.dirname(filePath);
-      const parentDirName = path.basename(parentDir);
-      
-      // For multi-disc albums, look for the actual album directory
-      let albumDir = parentDirName;
-      
-      // If current dir looks like "Digital Media 01", "12 Vinyl 01", etc., go up one level
-      if (parentDirName.match(/^(Digital Media|12 Vinyl|CD|Disc)\s*\d+$/i)) {
-        const grandParentDir = path.dirname(parentDir);
-        albumDir = path.basename(grandParentDir);
-      }
-      
-      // Extract album from directory (e.g., "Voyage (2021)" -> album: "Voyage", year: 2021)
-      const albumMatch = albumDir.match(/^(.+?)(?:\s*\((\d{4})\))?$/);
-      if (albumMatch) {
-        metadata.album = albumMatch[1].trim();
-        if (albumMatch[2]) {
-          metadata.year = parseInt(albumMatch[2]);
-        }
-      }
-
-      // Parse filename for track number and title
-      const filename = path.basename(filePath, path.extname(filePath));
-      const trackMatch = filename.match(/^(\d+)\s*[-.]\s*(.+)$/);
-      
-      if (trackMatch) {
-        metadata.track = parseInt(trackMatch[1]);
-        metadata.title = trackMatch[2].trim();
-        
-        // For ABBA tracks, set artist
-        if (!metadata.artist && (metadata.album === 'Voyage' || metadata.album === 'Thank You for the Music' || parentDirName.includes('Gold'))) {
-          metadata.artist = 'ABBA';
-        }
-        
-        console.log(`📂 Extracted from directory structure: ${filename}:`, {
-          title: metadata.title,
-          artist: metadata.artist,
-          album: metadata.album,
-          track: metadata.track,
-          year: metadata.year
-        });
-      } else {
-        metadata.title = filename;
-        console.log(`📝 Used filename as title: ${filename}`);
-      }
-      
-    } catch (error) {
-      console.log(`⚠️ Directory parsing failed for ${filePath}:`, error.message);
+    // Method 4: Use directory parsing as final fallback
+    const directoryMetadata = await this.extractDirectoryMetadata(filePath);
+    metadata = { ...metadata, ...directoryMetadata };
+    
+    // Set fallback title if still missing
+    if (!metadata.title) {
       const filename = path.basename(filePath, path.extname(filePath));
       metadata.title = filename;
     }
+    
+    // For ABBA tracks, set artist if missing
+    if (!metadata.artist && (metadata.album === 'Voyage' || metadata.album === 'Thank You for the Music')) {
+      metadata.artist = 'ABBA';
+    }
+    
+    console.log(`📂 Final metadata for: ${path.basename(filePath)}:`, {
+      title: metadata.title,
+      artist: metadata.artist,
+      album: metadata.album,
+      track: metadata.track,
+      year: metadata.year
+    });
 
     return metadata;
   }
@@ -597,30 +615,18 @@ class MusicScanner {
 
   async saveAlbumArtwork(filePath, artwork) {
     try {
-      // Create artwork directory if it doesn't exist
-      const artworkDir = path.join(process.cwd(), 'public', 'artwork');
-      await fs.mkdir(artworkDir, { recursive: true });
-      
-      // Generate unique filename based on audio file path and hash
-      const audioFileHash = crypto.createHash('md5').update(filePath).digest('hex');
       const extension = artwork.format === 'image/jpeg' ? 'jpg' : 
                        artwork.format === 'image/png' ? 'png' : 'jpg';
-      const artworkFileName = `${audioFileHash}.${extension}`;
-      const artworkPath = path.join(artworkDir, artworkFileName);
       
-      // Check if artwork already exists
-      try {
-        await fs.access(artworkPath);
-        return `/artwork/${artworkFileName}`; // Return existing artwork path
-      } catch {
-        // Artwork doesn't exist, save it
+      // Use cache service to store artwork
+      const artworkPath = await cacheService.setCachedArtwork(artwork.data, extension);
+      
+      if (artworkPath) {
+        console.log(`🎨 Cached album artwork for: ${path.basename(filePath)}`);
+        return artworkPath;
       }
       
-      // Save the artwork
-      await fs.writeFile(artworkPath, artwork.data);
-      console.log(`💾 Saved album artwork to: ${artworkPath}`);
-      
-      return `/artwork/${artworkFileName}`;
+      return null;
     } catch (error) {
       console.error(`❌ Failed to save album artwork for ${filePath}:`, error);
       return null;
@@ -628,20 +634,20 @@ class MusicScanner {
   }
 
   async checkForAnyLyrics(filePath) {
-    // Check for .lrc file
-    const lrcPath = filePath.replace(/\.[^/.]+$/, '.lrc');
     try {
-      await fs.access(lrcPath);
-      return true;
-    } catch {
-      // No LRC file, check embedded lyrics
-      return await this.checkForEmbeddedLyrics(filePath);
+      // Use the enhanced lyrics embedder to check for ANY lyrics (sidecar + embedded)
+      return await lyricsEmbedder.hasAnyLyrics(filePath);
+    } catch (error) {
+      console.error(`Error checking for any lyrics for ${filePath}:`, error);
+      return false;
     }
   }
 
   async checkForEmbeddedLyrics(filePath) {
     try {
-      return await lyricsEmbedder.hasEmbeddedLyrics(filePath);
+      // Use the enhanced method to check embedded and sidecar
+      const result = await lyricsEmbedder.readAnyLyrics(filePath);
+      return result.hasLyrics;
     } catch (error) {
       console.error(`Error checking embedded lyrics for ${filePath}:`, error);
       return false;

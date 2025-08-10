@@ -8,6 +8,7 @@ require('dotenv').config();
 
 const { initializeDatabase } = require('./src/database');
 const { initializeRedis } = require('./src/redis');
+const cacheService = require('./src/services/cacheService');
 
 // Import routes
 const tracksRouter = require('./src/routes/tracks');
@@ -43,8 +44,9 @@ app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Static file serving for album artwork
+// Static file serving for album artwork and cache
 app.use('/artwork', express.static(path.join(__dirname, 'public', 'artwork')));
+app.use('/cache', express.static(process.env.CACHE_PATH || '/app/cache'));
 
 // Routes
 app.use('/api/health', healthRouter);
@@ -54,6 +56,7 @@ app.use('/api/scan', scanRouter);
 app.use('/api/cleanup', cleanupRouter);
 app.use('/api/publish', publishRouter);
 app.use('/api/settings', require('./src/routes/settings'));
+app.use('/api/cache', require('./src/routes/cache'));
 
 // Error handling middleware
 app.use((error, req, res, next) => {
@@ -78,9 +81,13 @@ async function startServer() {
     console.log('Initializing Redis...');
     await initializeRedis();
     
+    console.log('Initializing cache service...');
+    await cacheService.initializeCacheDirectories();
+    
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📁 Music directory: ${process.env.MUSIC_PATH || '/app/music'}`);
+      console.log(`📁 Cache directory: ${process.env.CACHE_PATH || '/app/cache'}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);

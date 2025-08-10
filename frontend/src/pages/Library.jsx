@@ -45,6 +45,14 @@ import LyricsSearchDialog from '../components/LyricsSearchDialog';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 
+// Helper function to format duration
+const formatDuration = (seconds) => {
+  if (!seconds || isNaN(seconds)) return '—';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
+
 export default function Library() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
@@ -54,7 +62,7 @@ export default function Library() {
   const [lyricsSearchOpen, setLyricsSearchOpen] = useState(false);
   const [trackForSearch, setTrackForSearch] = useState(null);
   
-  const { selectedTracks, toggleTrackSelection, clearSelectedTracks, setSelectedTracks } = useAppStore();
+  const { selectedTracks, toggleTrackSelection, clearSelectedTracks, setSelectedTracks, setCurrentTrack } = useAppStore();
   const queryClient = useQueryClient();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -122,9 +130,8 @@ export default function Library() {
   };
 
   const handlePlayTrack = (track) => {
-    // Set the track as selected and navigate to Now Playing
-    clearSelectedTracks();
-    toggleTrackSelection(track.id);
+    // Set the current playing track and navigate to Now Playing
+    setCurrentTrack(track);
     navigate('/now-playing');
   };
 

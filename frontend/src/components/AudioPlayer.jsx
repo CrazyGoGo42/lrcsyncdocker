@@ -16,6 +16,7 @@ import {
   Stop as StopIcon,
   VolumeUp as VolumeIcon,
   VolumeOff as MuteIcon,
+  MusicNote as MusicNoteIcon,
 } from '@mui/icons-material';
 
 const AudioPlayer = ({ 
@@ -25,7 +26,8 @@ const AudioPlayer = ({
   onPause, 
   onStop,
   seeking = false,
-  seekTime = null 
+  seekTime = null,
+  autoplay = false
 }) => {
   const theme = useTheme();
   const [isPlaying, setIsPlaying] = useState(false);
@@ -51,9 +53,53 @@ const AudioPlayer = ({
     };
   }, []);
 
+  // Check browser codec support for all major audio formats
+  const checkCodecSupport = useCallback((format) => {
+    const audio = document.createElement('audio');
+    const mimeTypes = {
+      // Lossless formats
+      'flac': 'audio/flac',
+      'wav': 'audio/wav',
+      'alac': 'audio/mp4', // Apple Lossless in MP4 container
+      'ape': 'audio/x-monkeys-audio',
+      'wv': 'audio/x-wavpack',
+      
+      // Lossy compressed formats
+      'mp3': 'audio/mpeg',
+      'aac': 'audio/aac',
+      'm4a': 'audio/mp4', // AAC in MP4 container
+      'ogg': 'audio/ogg; codecs="vorbis"',
+      'oga': 'audio/ogg; codecs="vorbis"',
+      'opus': 'audio/ogg; codecs="opus"',
+      'wma': 'audio/x-ms-wma',
+      
+      // Other formats
+      'webm': 'audio/webm',
+      'mp4': 'audio/mp4',
+      '3gp': 'audio/3gpp',
+      'amr': 'audio/amr',
+      
+      // Legacy formats
+      'au': 'audio/basic',
+      'snd': 'audio/basic',
+      'aiff': 'audio/aiff',
+      'aifc': 'audio/aiff'
+    };
+    
+    const mimeType = mimeTypes[format.toLowerCase()];
+    if (!mimeType) {
+      return false;
+    }
+    
+    const canPlay = audio.canPlayType(mimeType);
+    const isSupported = canPlay === 'probably' || canPlay === 'maybe';
+    
+    return isSupported;
+  }, []);
+
   // Load new track
   useEffect(() => {
-    if (!track?.file_path) {
+    if (!track?.id) {
       if (howlRef.current) {
         howlRef.current.unload();
         howlRef.current = null;
@@ -73,40 +119,64 @@ const AudioPlayer = ({
       howlRef.current.unload();
     }
 
-    // Create audio URL for the track
+    // Create audio URL for the track with format hint
     const audioUrl = `/api/tracks/${track.id}/audio`;
     
-    console.log(`🎵 Loading audio from: ${audioUrl}`);
+    // Determine format from filename extension
+    const fileExtension = track.filename ? track.filename.split('.').pop().toLowerCase() : '';
+    const format = fileExtension || 'mp3'; // Default to mp3 if no extension
+    
+    // Check if browser supports the format
+    const isSupported = checkCodecSupport(format);
+    
+    if (!isSupported) {
+      setError(`Audio format '${format}' is not supported by your browser`);
+      setIsLoading(false);
+      return;
+    }
 
     howlRef.current = new Howl({
       src: [audioUrl],
+      format: [format], // Provide format hint to Howler
       html5: true,
       volume: isMuted ? 0 : volume,
       onload: () => {
-        console.log(`✅ Audio loaded successfully for track ${track.id}`);
         setIsLoading(false);
         setDuration(howlRef.current.duration());
         setError(null);
+        
+        // Auto-start playback if requested
+        if (autoplay) {
+          setTimeout(() => {
+            howlRef.current.play();
+            setIsPlaying(true);
+            onPlay?.();
+          }, 100);
+        }
       },
       onloaderror: (id, error) => {
-        console.error('❌ Audio load error:', { id, error, audioUrl });
-        setError(`Failed to load audio file: ${error || 'Unknown error'}`);
+        let errorMessage = `Failed to load audio file: ${error || 'Unknown error'}`;
+        
+        // Provide specific guidance for FLAC files
+        if (format === 'flac') {
+          errorMessage = `FLAC audio not supported in this browser. File format: ${format}`;
+        }
+        
+        setError(errorMessage);
         setIsLoading(false);
       },
       onplayerror: (id, error) => {
-        console.error('❌ Audio play error:', { id, error, audioUrl });
         setError(`Failed to play audio: ${error || 'Unknown error'}`);
         setIsPlaying(false);
       },
       onend: () => {
-        console.log(`🎵 Audio playback ended for track ${track.id}`);
         setIsPlaying(false);
         setCurrentTime(0);
         onStop?.();
       }
     });
 
-  }, [track?.id, track?.file_path, volume, isMuted]);
+  }, [track?.id, track?.filename, volume, isMuted, checkCodecSupport]);
 
   // Handle external seek requests
   useEffect(() => {
@@ -212,14 +282,65 @@ const AudioPlayer = ({
   return (
     <Card elevation={2}>
       <CardContent>
-        {/* Track Info */}
-        <Box sx={{ mb: 2 }}>
-          <Typography variant="h6" noWrap>
-            {track.title || track.filename}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" noWrap>
-            {track.artist} {track.album && `• ${track.album}`}
-          </Typography>
+        {/* Track Info with Artwork */}
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, gap: 2 }}>
+          {/* Album Artwork */}
+          <Box
+            sx={{
+              width: 64,
+              height: 64,
+              borderRadius: 2,
+              overflow: 'hidden',
+              flexShrink: 0,
+              background: theme.palette.grey[200],
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            {track.artwork_path ? (
+              <img
+                src={track.artwork_path}
+                alt={`${track.album} artwork`}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover'
+                }}
+                onError={(e) => {
+                  e.target.style.display = 'none';
+                  e.target.nextSibling.style.display = 'flex';
+                }}
+              />
+            ) : null}
+            <Box
+              sx={{
+                display: track.artwork_path ? 'none' : 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '100%',
+                height: '100%',
+                color: theme.palette.grey[500]
+              }}
+            >
+              <MusicNoteIcon sx={{ fontSize: 32 }} />
+            </Box>
+          </Box>
+
+          {/* Track Text Info */}
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography variant="h6" noWrap sx={{ fontWeight: 600 }}>
+              {track.title || track.filename}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" noWrap>
+              {track.artist}
+            </Typography>
+            {track.album && (
+              <Typography variant="caption" color="text.secondary" noWrap>
+                {track.album}
+              </Typography>
+            )}
+          </Box>
         </Box>
 
         {/* Error Display */}
@@ -264,28 +385,75 @@ const AudioPlayer = ({
         <Box sx={{ 
           display: 'flex', 
           alignItems: 'center', 
-          justifyContent: 'center',
-          gap: 1 
+          justifyContent: 'space-between',
+          gap: 2,
+          flexWrap: { xs: 'wrap', sm: 'nowrap' }
         }}>
-          <IconButton
-            onClick={handlePlay}
-            disabled={isLoading || !!error}
-            size="large"
-            color="primary"
-          >
-            {isPlaying ? <PauseIcon /> : <PlayIcon />}
-          </IconButton>
-          
-          <IconButton
-            onClick={handleStop}
-            disabled={isLoading || !!error}
-            size="medium"
-          >
-            <StopIcon />
-          </IconButton>
+          {/* Playback Controls */}
+          <Box sx={{ 
+            display: 'flex', 
+            alignItems: 'center',
+            gap: 1,
+            order: { xs: 1, sm: 0 },
+            width: { xs: '100%', sm: 'auto' },
+            justifyContent: { xs: 'center', sm: 'flex-start' }
+          }}>
+            <IconButton
+              onClick={handlePlay}
+              disabled={isLoading || !!error}
+              size="large"
+              color="primary"
+              sx={{ 
+                backgroundColor: 'primary.main',
+                color: 'white',
+                '&:hover': {
+                  backgroundColor: 'primary.dark',
+                  transform: 'scale(1.05)',
+                },
+                '&:disabled': {
+                  backgroundColor: 'action.disabled',
+                },
+                transition: 'all 0.2s ease-in-out',
+              }}
+            >
+              {isPlaying ? <PauseIcon /> : <PlayIcon />}
+            </IconButton>
+            
+            <IconButton
+              onClick={handleStop}
+              disabled={isLoading || !!error}
+              size="medium"
+              sx={{
+                '&:hover': {
+                  transform: 'scale(1.05)',
+                },
+                transition: 'all 0.2s ease-in-out',
+              }}
+            >
+              <StopIcon />
+            </IconButton>
+          </Box>
 
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 2 }}>
-            <IconButton onClick={handleMuteToggle} size="small">
+          {/* Volume Control */}
+          <Box sx={{ 
+            display: { xs: 'flex', sm: 'flex' },
+            alignItems: 'center', 
+            gap: 1,
+            order: { xs: 2, sm: 0 },
+            width: { xs: '100%', sm: 'auto' },
+            justifyContent: { xs: 'center', sm: 'flex-end' },
+            minWidth: { sm: 120 }
+          }}>
+            <IconButton 
+              onClick={handleMuteToggle} 
+              size="small"
+              sx={{
+                '&:hover': {
+                  transform: 'scale(1.1)',
+                },
+                transition: 'all 0.2s ease-in-out',
+              }}
+            >
               {isMuted ? <MuteIcon /> : <VolumeIcon />}
             </IconButton>
             <Slider
@@ -294,7 +462,15 @@ const AudioPlayer = ({
               min={0}
               max={1}
               step={0.05}
-              sx={{ width: 80 }}
+              sx={{ 
+                width: { xs: 120, sm: 80 },
+                '& .MuiSlider-thumb': {
+                  transition: 'all 0.2s ease-in-out',
+                  '&:hover': {
+                    boxShadow: '0px 4px 8px rgba(0, 0, 0, 0.16)',
+                  },
+                },
+              }}
               size="small"
             />
           </Box>

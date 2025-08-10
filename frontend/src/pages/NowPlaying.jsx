@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import {
   Box,
@@ -38,7 +38,7 @@ import toast from 'react-hot-toast';
 const NowPlaying = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const { selectedTracks } = useAppStore();
+  const storeCurrentTrack = useAppStore(state => state.currentTrack);
   const queryClient = useQueryClient();
 
   const [currentTrack, setCurrentTrack] = useState(null);
@@ -53,31 +53,27 @@ const NowPlaying = () => {
   const [seeking, setSeeking] = useState(false);
   const [seekTime, setSeekTime] = useState(null);
 
-  // Load the first selected track or default
+  // Memoize track ID to prevent unnecessary re-renders
+  const storeTrackId = useMemo(() => storeCurrentTrack?.id, [storeCurrentTrack?.id]);
+
+  // Load current track from store with autoplay
   useEffect(() => {
-    if (selectedTracks.length > 0 && !currentTrack) {
-      console.log('🎵 Setting current track from selected tracks:', selectedTracks[0]);
-      // Load track details - for now use selectedTracks[0] as currentTrack
-      setCurrentTrack({ id: selectedTracks[0] });
+    if (storeCurrentTrack && (!currentTrack || storeCurrentTrack.id !== currentTrack.id)) {
+      setCurrentTrack(storeCurrentTrack);
+      // Auto-start playback when a new track is loaded
+      setTimeout(() => {
+        setIsPlaying(true);
+      }, 500); // Small delay to ensure audio is loaded
     }
-  }, [selectedTracks, currentTrack]);
+  }, [storeTrackId]);
 
   // Fetch lyrics for current track
   const { data: lyricsData, isLoading: lyricsLoading, error: lyricsError } = useQuery(
     ['lyrics', currentTrack?.id],
-    () => {
-      console.log('🎵 Fetching lyrics for track:', currentTrack?.id);
-      return getLyrics(currentTrack.id);
-    },
+    () => getLyrics(currentTrack.id),
     {
       enabled: !!currentTrack?.id,
       staleTime: 5 * 60 * 1000, // 5 minutes
-      onSuccess: (data) => {
-        console.log('✅ Lyrics fetched successfully:', data);
-      },
-      onError: (error) => {
-        console.error('❌ Error fetching lyrics:', error);
-      }
     }
   );
 
@@ -142,7 +138,7 @@ const NowPlaying = () => {
     }
   }, [currentTrack?.id, saveLyricsMutation]);
 
-  const handleTabChange = (event, newValue) => {
+  const handleTabChange = (_, newValue) => {
     setActiveTab(newValue);
   };
 
@@ -180,46 +176,6 @@ const NowPlaying = () => {
   const hasLyrics = !!lyrics;
   const isSyncedLyrics = lyrics && lyrics.includes('[') && lyrics.match(/\[\d{2}:\d{2}\.\d{2,3}\]/);
 
-  // Debug information
-  console.log('🎵 NowPlaying state:', {
-    currentTrack: currentTrack?.id,
-    lyricsLoading,
-    lyricsError: lyricsError?.message,
-    hasLyricsData: !!lyricsData,
-    lyricsSource: lyricsData?.source,
-    hasLyrics,
-    lyricsLength: lyrics?.length
-  });
-
-  // Debug function to test audio endpoint
-  const testAudioEndpoint = useCallback(async () => {
-    if (!currentTrack?.id) return;
-    
-    try {
-      console.log(`🔧 Testing audio endpoint for track ${currentTrack.id}...`);
-      
-      // Test debug endpoint first
-      const debugResponse = await fetch(`/api/tracks/${currentTrack.id}/debug`);
-      const debugData = await debugResponse.json();
-      console.log('🔧 Debug data:', debugData);
-      
-      // Test audio endpoint
-      const audioResponse = await fetch(`/api/tracks/${currentTrack.id}/audio`);
-      console.log(`🔧 Audio response status: ${audioResponse.status}`);
-      console.log(`🔧 Audio response headers:`, Object.fromEntries(audioResponse.headers));
-      
-      if (audioResponse.ok) {
-        const blob = await audioResponse.blob();
-        console.log(`🔧 Audio blob:`, { type: blob.type, size: blob.size });
-      } else {
-        const errorText = await audioResponse.text();
-        console.log(`🔧 Audio error response:`, errorText);
-      }
-      
-    } catch (error) {
-      console.error('🔧 Test error:', error);
-    }
-  }, [currentTrack?.id]);
 
   return (
     <Box sx={{ 
@@ -245,16 +201,6 @@ const NowPlaying = () => {
                 Synchronized lyrics player with editing capabilities
               </Typography>
             </Box>
-            {currentTrack?.id && (
-              <Button 
-                variant="outlined" 
-                size="small" 
-                onClick={testAudioEndpoint}
-                sx={{ ml: 2 }}
-              >
-                Debug Audio
-              </Button>
-            )}
           </Box>
         </Box>
       )}
@@ -271,6 +217,7 @@ const NowPlaying = () => {
               onStop={handleStop}
               seeking={seeking}
               seekTime={seekTime}
+              autoplay={isPlaying}
             />
             
             {/* Fullscreen toggle */}

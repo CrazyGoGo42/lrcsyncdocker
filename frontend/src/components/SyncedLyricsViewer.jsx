@@ -53,10 +53,14 @@ const SyncedLyricsViewer = ({
   currentTime = 0, 
   onSeek, 
   isPlaying = false,
-  showTimestamps = false 
+  showTimestamps = false,
+  accentColor = null
 }) => {
   const theme = useTheme();
   const [activeLine, setActiveLine] = useState(-1);
+  
+  // Use accent color from album extraction or fallback to theme primary
+  const activeColor = accentColor || theme.palette.primary.main;
 
   // Parse lyrics content
   const { lyrics, metadata } = useMemo(() => {
@@ -213,10 +217,10 @@ const SyncedLyricsViewer = ({
                     gap: 2,
                     transition: 'all 0.3s ease',
                     backgroundColor: isActive 
-                      ? theme.palette.primary.main + '20'
+                      ? activeColor + '20'
                       : 'transparent',
                     borderLeft: isActive 
-                      ? `4px solid ${theme.palette.primary.main}`
+                      ? `4px solid ${activeColor}`
                       : '4px solid transparent',
                     opacity: isPast && isSyncedLyrics ? 0.6 : 1,
                     transform: isActive ? 'scale(1.02)' : 'scale(1)',
@@ -247,7 +251,7 @@ const SyncedLyricsViewer = ({
                       fontWeight: isActive ? 600 : 400,
                       fontSize: isActive ? '1.1rem' : '1rem',
                       color: isActive 
-                        ? theme.palette.primary.main
+                        ? activeColor
                         : isPast && isSyncedLyrics
                         ? theme.palette.text.secondary
                         : theme.palette.text.primary,

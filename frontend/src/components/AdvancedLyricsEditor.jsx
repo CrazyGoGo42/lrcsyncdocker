@@ -399,7 +399,7 @@ const AdvancedLyricsEditor = ({
       </Paper>
 
       {/* Editor Content */}
-      <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
+      <Box sx={{ flexGrow: 1, overflow: 'auto', height: 'calc(100vh - 200px)' }}>
         {isPreviewMode ? (
           <Card sx={{ height: '100%' }}>
             <CardContent sx={{ height: '100%', overflow: 'auto' }}>

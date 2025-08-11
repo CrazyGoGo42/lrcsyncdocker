@@ -34,6 +34,7 @@ services:
       PORT: 5000
       MUSIC_PATH: /app/music
       CACHE_PATH: /app/cache
+      FRONTEND_URL: http://localhost:3000
     volumes:
       - ./music:/app/music # Mount your music directory here
       - ./cache:/app/cache # Cache directory for performance and persistence

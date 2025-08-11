@@ -1,6 +1,6 @@
 {
   "name": "lyrics-sync-backend",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Backend API for lyrics synchronization web app",
   "main": "server.js",
   "scripts": {

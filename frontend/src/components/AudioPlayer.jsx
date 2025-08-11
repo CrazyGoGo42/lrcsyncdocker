@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Howl, Howler } from 'howler';
 import { useAppStore } from '../store/appStore';
+import { useAlbumColors } from '../contexts/AlbumColorContext';
 import {
   Box,
   Paper,
@@ -31,6 +32,7 @@ const AudioPlayer = ({
   autoplay = false
 }) => {
   const theme = useTheme();
+  const { colors } = useAlbumColors();
   
   // Use shared state for playback
   const { 
@@ -331,7 +333,7 @@ const AudioPlayer = ({
           >
             {track.artwork_path ? (
               <img
-                src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/cache/artwork/${track.artwork_path.split('/').pop()}?v=${Date.now()}`}
+                src={`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/cache/artwork/${track.artwork_path.split('/').pop()}?v=${Date.now()}`}
                 alt={`${track.album} artwork`}
                 style={{
                   width: '100%',
@@ -393,12 +395,19 @@ const AudioPlayer = ({
               '& .MuiSlider-thumb': {
                 width: 12,
                 height: 12,
+                backgroundColor: colors.primary,
+                '&:hover': {
+                  boxShadow: `0px 0px 0px 8px ${colors.primary}20`,
+                },
               },
               '& .MuiSlider-track': {
                 height: 4,
+                background: `linear-gradient(90deg, ${colors.primary} 0%, ${colors.secondary} 100%)`,
+                border: 'none',
               },
               '& .MuiSlider-rail': {
                 height: 4,
+                backgroundColor: theme.palette.action.disabled,
               }
             }}
           />
@@ -433,16 +442,16 @@ const AudioPlayer = ({
               onClick={handlePlay}
               disabled={isLoading || !!error}
               size="large"
-              color="primary"
               sx={{ 
-                backgroundColor: 'primary.main',
+                background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.secondary} 100%)`,
                 color: 'white',
                 '&:hover': {
-                  backgroundColor: 'primary.dark',
+                  background: `linear-gradient(135deg, ${colors.secondary} 0%, ${colors.accent} 100%)`,
                   transform: 'scale(1.05)',
                 },
                 '&:disabled': {
                   backgroundColor: 'action.disabled',
+                  background: 'none',
                 },
                 transition: 'all 0.2s ease-in-out',
               }}
@@ -496,11 +505,18 @@ const AudioPlayer = ({
               sx={{ 
                 width: { xs: 120, sm: 80 },
                 '& .MuiSlider-thumb': {
+                  backgroundColor: colors.accent,
                   transition: 'all 0.2s ease-in-out',
                   '&:hover': {
-                    boxShadow: '0px 4px 8px rgba(0, 0, 0, 0.16)',
+                    boxShadow: `0px 0px 0px 8px ${colors.accent}20`,
                   },
                 },
+                '& .MuiSlider-track': {
+                  backgroundColor: colors.accent,
+                },
+                '& .MuiSlider-rail': {
+                  backgroundColor: theme.palette.action.disabled,
+                }
               }}
               size="small"
             />

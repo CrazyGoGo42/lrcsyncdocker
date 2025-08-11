@@ -19,11 +19,13 @@ import {
   OpenInFull as OpenInFullIcon,
 } from '@mui/icons-material';
 import { useAppStore } from '../store/appStore';
+import { useAlbumColors } from '../contexts/AlbumColorContext';
 
 const MiniAudioPlayer = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const navigate = useNavigate();
+  const { colors } = useAlbumColors();
   const { 
     currentTrack, 
     isPlaying, 
@@ -50,14 +52,15 @@ const MiniAudioPlayer = () => {
           right: 0,
           zIndex: 1300,
           borderRadius: '16px 16px 0 0',
-          backdropFilter: 'blur(20px)',
-          backgroundColor: theme.palette.mode === 'dark' 
-            ? 'rgba(30, 41, 59, 0.95)' // Dark theme
-            : 'rgba(255, 255, 255, 0.95)', // Light theme
+          backdropFilter: 'blur(20px) saturate(1.2)',
+          WebkitBackdropFilter: 'blur(20px) saturate(1.2)',
+          background: theme.palette.mode === 'dark' 
+            ? `linear-gradient(135deg, ${colors.primary}15 0%, ${colors.secondary}10 50%, ${colors.accent}05 100%)`
+            : `linear-gradient(135deg, ${colors.primary}20 0%, ${colors.secondary}15 50%, ${colors.accent}10 100%)`,
           boxShadow: theme.palette.mode === 'dark'
-            ? '0 -4px 20px rgba(0, 0, 0, 0.3)'
-            : '0 -4px 20px rgba(0, 0, 0, 0.1)',
-          borderTop: `1px solid ${theme.palette.divider}`,
+            ? `0 -4px 20px rgba(0, 0, 0, 0.3), 0 -2px 8px ${colors.primary}20`
+            : `0 -4px 20px rgba(0, 0, 0, 0.1), 0 -2px 8px ${colors.primary}15`,
+          borderTop: `1px solid ${theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
         }}
       >
         <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
@@ -86,7 +89,7 @@ const MiniAudioPlayer = () => {
             >
               {currentTrack.artwork_path ? (
                 <img
-                  src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/cache/artwork/${currentTrack.artwork_path.split('/').pop()}?v=${Date.now()}`}
+                  src={`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/cache/artwork/${currentTrack.artwork_path.split('/').pop()}?v=${Date.now()}`}
                   alt={`${currentTrack.album} artwork`}
                   style={{
                     width: '100%',
@@ -140,11 +143,11 @@ const MiniAudioPlayer = () => {
                   togglePlayback();
                 }}
                 sx={{
-                  backgroundColor: 'primary.main',
+                  background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.secondary} 100%)`,
                   color: 'white',
                   mx: 0.5,
                   '&:hover': {
-                    backgroundColor: 'primary.dark',
+                    background: `linear-gradient(135deg, ${colors.secondary} 0%, ${colors.accent} 100%)`,
                   },
                 }}
               >

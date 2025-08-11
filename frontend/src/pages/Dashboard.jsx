@@ -28,9 +28,12 @@ import {
   Download as DownloadIcon,
 } from '@mui/icons-material';
 import { getTracks } from '../services/api';
+import { useAppStore } from '../store/appStore';
+import ModernAudioPlayer from '../components/ModernAudioPlayer';
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { currentTrack } = useAppStore();
   const { data: tracksData, isLoading, error } = useQuery('tracks', () => getTracks({ limit: 1000 })); // Get all tracks for stats
 
   if (isLoading) {
@@ -369,6 +372,13 @@ export default function Dashboard() {
           </Paper>
         </Grid>
       </Grid>
+
+      {/* Modern Audio Player */}
+      {currentTrack && (
+        <Box sx={{ mt: 4 }}>
+          <ModernAudioPlayer />
+        </Box>
+      )}
     </Box>
   );
 }

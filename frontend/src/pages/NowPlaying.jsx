@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import {
   Box,
@@ -34,25 +34,26 @@ import {
   Repeat as RepeatIcon,
   RepeatOne as RepeatOneIcon,
   VolumeUp as VolumeIcon,
-  VolumeOff as MuteIcon,
   Menu as MenuIcon,
-  ArrowBack as ArrowBackIcon,
+  Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import { useAppStore } from '../store/appStore';
+import { useAlbumColors } from '../contexts/AlbumColorContext';
 import SyncedLyricsViewer from '../components/SyncedLyricsViewer';
 import AdvancedLyricsEditor from '../components/AdvancedLyricsEditor';
 import LyricsPublisher from '../components/LyricsPublisher';
-import { getLyrics, saveLyrics, searchLyrics } from '../services/api';
+import { getLyrics, saveLyrics } from '../services/api';
+import { createArtworkUrl, refreshImageOnMobile } from '../utils/imageLoader';
 import toast from 'react-hot-toast';
 
 const NowPlaying = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { colors, gradient } = useAlbumColors();
   const { 
     currentTrack: storeCurrentTrack,
     isPlaying,
     currentTime,
-    setIsPlaying,
     setCurrentTime,
     nextTrack,
     previousTrack,
@@ -65,7 +66,9 @@ const NowPlaying = () => {
     togglePlayback,
     volume,
     setVolume,
-    setSidebarOpen
+    setSidebarOpen,
+    seekToTime,
+    duration
   } = useAppStore();
   const queryClient = useQueryClient();
 
@@ -75,12 +78,11 @@ const NowPlaying = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showTimestamps, setShowTimestamps] = useState(false);
   const [autoSeek, setAutoSeek] = useState(true);
-  const [seeking, setSeeking] = useState(false);
-  const [seekTime, setSeekTime] = useState(null);
   const [showMobileLyrics, setShowMobileLyrics] = useState(false);
+  const [imageVersion, setImageVersion] = useState(Date.now());
 
   // Fetch lyrics for current track
-  const { data: lyricsData, isLoading: lyricsLoading, error: lyricsError } = useQuery(
+  const { data: lyricsData } = useQuery(
     ['lyrics', storeCurrentTrack?.id],
     () => getLyrics(storeCurrentTrack.id),
     {
@@ -104,36 +106,10 @@ const NowPlaying = () => {
     }
   );
 
-  const handleTimeUpdate = useCallback((time) => {
-    if (!seeking) {
-      setCurrentTime(time);
-    }
-  }, [seeking]);
-
-  const handlePlay = useCallback(() => {
-    setIsPlaying(true);
-  }, []);
-
-  const handlePause = useCallback(() => {
-    setIsPlaying(false);
-  }, []);
-
-  const handleStop = useCallback(() => {
-    setIsPlaying(false);
-    setCurrentTime(0);
-  }, []);
 
   const handleSeek = useCallback((time) => {
-    setSeeking(true);
-    setSeekTime(time);
-    setCurrentTime(time);
-    
-    // Clear seeking state after a short delay
-    setTimeout(() => {
-      setSeeking(false);
-      setSeekTime(null);
-    }, 100);
-  }, []);
+    seekToTime(time);
+  }, [seekToTime]);
 
   const handleLyricsSeek = useCallback((time) => {
     if (autoSeek) {
@@ -158,6 +134,17 @@ const NowPlaying = () => {
     setIsFullscreen(!isFullscreen);
   };
 
+  const refreshImage = useCallback(() => {
+    setImageVersion(Date.now());
+  }, []);
+
+  // Refresh images when track changes
+  useEffect(() => {
+    if (storeCurrentTrack?.artwork_path) {
+      setImageVersion(Date.now());
+    }
+  }, [storeCurrentTrack?.id]);
+
   if (!storeCurrentTrack) {
     return (
       <Box 
@@ -166,18 +153,36 @@ const NowPlaying = () => {
           flexDirection: 'column', 
           alignItems: 'center', 
           justifyContent: 'center',
-          height: '70vh',
-          textAlign: 'center'
+          minHeight: '60vh',
+          height: 'calc(100vh - 200px)',
+          textAlign: 'center',
+          p: 3,
+          backgroundColor: 'var(--bg-primary)',
+          color: 'var(--text-primary)'
         }}
       >
-        <MusicNoteIcon sx={{ fontSize: 80, color: 'text.secondary', mb: 2 }} />
-        <Typography variant="h4" color="text.secondary" gutterBottom>
+        <MusicNoteIcon sx={{ fontSize: 80, mb: 2, color: 'var(--text-secondary)' }} />
+        <Typography 
+          variant="h4" 
+          gutterBottom
+          sx={{ color: 'var(--text-primary)', mb: 2 }}
+        >
           No Track Selected
         </Typography>
-        <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+        <Typography 
+          variant="body1" 
+          sx={{ mb: 3, color: 'var(--text-secondary)' }}
+        >
           Select a track from your library to start playing
         </Typography>
-        <Button variant="contained" href="/library">
+        <Button 
+          variant="contained" 
+          href="/library"
+          sx={{ 
+            backgroundColor: 'var(--accent-primary)',
+            '&:hover': { backgroundColor: 'var(--accent-hover)' }
+          }}
+        >
           Go to Library
         </Button>
       </Box>
@@ -199,23 +204,10 @@ const NowPlaying = () => {
       right: 0,
       bottom: 0,
       zIndex: isFullscreen ? 9999 : 'auto',
-      backgroundColor: isFullscreen ? theme.palette.background.default : 'transparent'
+      backgroundColor: isFullscreen ? 'var(--bg-primary)' : 'transparent',
+      color: 'var(--text-primary)',
+      minHeight: '60vh'
     }}>
-      {/* Header - only show on desktop */}
-      {!isFullscreen && !isMobile && (
-        <Box sx={{ mb: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Box>
-              <Typography variant="h4" sx={{ fontWeight: 700, mb: 1 }}>
-                Now Playing
-              </Typography>
-              <Typography variant="body1" color="text.secondary">
-                Synchronized lyrics player with editing capabilities
-              </Typography>
-            </Box>
-          </Box>
-        </Box>
-      )}
 
       {isMobile ? (
         /* Mobile Music Player Layout */
@@ -250,7 +242,16 @@ const NowPlaying = () => {
             <Typography variant="h6" sx={{ fontWeight: 600 }}>
               Now Playing
             </Typography>
-            <Box sx={{ width: 40 }} /> {/* Spacer for centering */}
+            <IconButton
+              onClick={refreshImage}
+              sx={{ 
+                color: 'text.primary',
+                backgroundColor: 'rgba(0, 0, 0, 0.1)',
+                '&:hover': { backgroundColor: 'rgba(0, 0, 0, 0.2)' }
+              }}
+            >
+              <RefreshIcon />
+            </IconButton>
           </Box>
 
           {/* Player Content */}
@@ -277,17 +278,31 @@ const NowPlaying = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.15)',
+              boxShadow: `0 12px 40px ${colors.primary}30, 0 8px 32px rgba(0, 0, 0, 0.15)`,
             }}
           >
             {storeCurrentTrack?.artwork_path ? (
               <img
-                src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/cache/artwork/${storeCurrentTrack.artwork_path.split('/').pop()}?v=${Date.now()}`}
+                src={createArtworkUrl(storeCurrentTrack.artwork_path)}
                 alt={`${storeCurrentTrack.album} artwork`}
                 style={{
                   width: '100%',
                   height: '100%',
                   objectFit: 'cover',
+                }}
+                onError={(e) => {
+                  // Prevent infinite retries - only retry once
+                  if (!e.target.hasAttribute('data-retry-attempted')) {
+                    e.target.setAttribute('data-retry-attempted', 'true');
+                    console.warn('Artwork failed to load, retrying once...');
+                    setTimeout(() => {
+                      e.target.src = createArtworkUrl(storeCurrentTrack.artwork_path);
+                      refreshImageOnMobile(e.target);
+                    }, 2000);
+                  } else {
+                    console.warn('Artwork failed to load after retry, showing fallback');
+                    e.target.style.display = 'none';
+                  }
                 }}
               />
             ) : (
@@ -315,7 +330,7 @@ const NowPlaying = () => {
                 {Math.floor(currentTime / 60)}:{String(Math.floor(currentTime % 60)).padStart(2, '0')}
               </Typography>
               <Typography variant="caption">
-                {Math.floor((storeCurrentTrack?.duration || 0) / 60)}:{String(Math.floor((storeCurrentTrack?.duration || 0) % 60)).padStart(2, '0')}
+                {Math.floor((duration || 0) / 60)}:{String(Math.floor((duration || 0) % 60)).padStart(2, '0')}
               </Typography>
             </Box>
             <Box
@@ -330,16 +345,17 @@ const NowPlaying = () => {
               onClick={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const percent = (e.clientX - rect.left) / rect.width;
-                const newTime = percent * (storeCurrentTrack?.duration || 0);
+                const newTime = percent * (duration || 0);
                 handleSeek(newTime);
               }}
             >
               <Box
                 sx={{
-                  width: `${storeCurrentTrack?.duration ? (currentTime / storeCurrentTrack.duration) * 100 : 0}%`,
+                  width: `${duration ? (currentTime / duration) * 100 : 0}%`,
                   height: '100%',
-                  backgroundColor: theme.palette.primary.main,
+                  backgroundColor: colors.primary,
                   borderRadius: 2,
+                  boxShadow: `0 0 8px ${colors.primary}40`,
                 }}
               />
             </Box>
@@ -362,14 +378,16 @@ const NowPlaying = () => {
             <IconButton
               onClick={() => togglePlayback()}
               sx={{
-                backgroundColor: theme.palette.primary.main,
+                backgroundColor: colors.primary,
                 color: 'white',
                 width: 72,
                 height: 72,
                 '&:hover': {
-                  backgroundColor: theme.palette.primary.dark,
+                  backgroundColor: colors.secondary,
+                  transform: 'scale(1.05)',
                 },
-                boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
+                boxShadow: `0 6px 20px ${colors.primary}40, 0 4px 16px rgba(0, 0, 0, 0.2)`,
+                transition: 'all 0.3s ease',
               }}
             >
               {isPlaying ? (
@@ -397,7 +415,7 @@ const NowPlaying = () => {
             <IconButton
               onClick={() => setShuffle(!shuffle)}
               sx={{ 
-                color: shuffle ? theme.palette.primary.main : 'text.secondary',
+                color: shuffle ? colors.primary : 'text.secondary',
                 '&:hover': { backgroundColor: 'action.hover' }
               }}
             >
@@ -425,7 +443,7 @@ const NowPlaying = () => {
                   sx={{
                     width: `${volume * 100}%`,
                     height: '100%',
-                    backgroundColor: theme.palette.primary.main,
+                    backgroundColor: colors.secondary,
                     borderRadius: 2,
                   }}
                 />
@@ -438,7 +456,7 @@ const NowPlaying = () => {
                 setRepeat(nextRepeat);
               }}
               sx={{ 
-                color: repeat !== 'off' ? theme.palette.primary.main : 'text.secondary',
+                color: repeat !== 'off' ? colors.primary : 'text.secondary',
                 '&:hover': { backgroundColor: 'action.hover' }
               }}
             >
@@ -465,7 +483,20 @@ const NowPlaying = () => {
               flexDirection: 'column'
             }}>
               <Box sx={{ p: 2, borderBottom: `1px solid ${theme.palette.divider}` }}>
-                <Typography variant="h6">Lyrics</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Typography variant="h6">Lyrics</Typography>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={showTimestamps}
+                        onChange={(e) => setShowTimestamps(e.target.checked)}
+                        size="small"
+                      />
+                    }
+                    label="Timestamps"
+                    sx={{ ml: 1 }}
+                  />
+                </Box>
               </Box>
               <Box sx={{ flex: 1, p: 2 }}>
                 <SyncedLyricsViewer
@@ -473,7 +504,8 @@ const NowPlaying = () => {
                   currentTime={currentTime}
                   onSeek={handleLyricsSeek}
                   isPlaying={isPlaying}
-                  showTimestamps={false}
+                  showTimestamps={showTimestamps}
+                  accentColor={colors.primary}
                 />
               </Box>
             </Paper>
@@ -482,70 +514,242 @@ const NowPlaying = () => {
         </Box>
       ) : (
         /* Desktop Layout - Left/Right Split */
-        <Grid container spacing={3} sx={{ height: isFullscreen ? '100%' : 'auto' }}>
+        <Box sx={{ 
+          display: 'flex',
+          gap: 3,
+          height: isFullscreen ? '100vh' : 'calc(100vh - 120px)',
+          width: '100%'
+        }}>
           {/* Left Side - Audio Player & Controls */}
-          <Grid item xs={12} md={isFullscreen ? 12 : 5}>
-            <Box sx={{ 
-              position: 'relative',
-              height: { md: isFullscreen ? 'auto' : '70vh' },
+          <Box sx={{ 
+            flex: '0 0 420px',
+            display: 'flex',
+            flexDirection: 'column',
+            position: 'relative'
+          }}>
+            {/* Desktop Audio Player UI */}
+            <Paper elevation={3} sx={{ 
+              flex: 1,
+              background: theme.palette.mode === 'dark' 
+                ? 'rgba(30, 30, 30, 0.95)' 
+                : 'rgba(255, 255, 255, 0.95)',
+              backdropFilter: 'blur(20px) saturate(1.2)',
+              WebkitBackdropFilter: 'blur(20px) saturate(1.2)',
+              borderRadius: 3,
+              overflow: 'hidden',
               display: 'flex',
               flexDirection: 'column'
             }}>
-              {/* Desktop Audio Player UI */}
-              <Card elevation={2}>
-                <CardContent>
-                  {/* Track Info with Artwork */}
-                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, gap: 2 }}>
+              <Box sx={{ 
+                p: 3,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                flex: 1,
+                justifyContent: 'center'
+              }}>
+                {/* Large Album Artwork */}
+                <Box
+                  sx={{
+                    width: 280,
+                    height: 280,
+                    borderRadius: 3,
+                    overflow: 'hidden',
+                    mb: 3,
+                    background: theme.palette.grey[200],
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: `0 16px 48px ${colors.primary}40, 0 8px 32px rgba(0, 0, 0, 0.2)`,
+                    position: 'relative'
+                  }}
+                >
+                  {storeCurrentTrack?.artwork_path ? (
+                    <img
+                      src={createArtworkUrl(storeCurrentTrack.artwork_path)}
+                      alt={`${storeCurrentTrack.album} artwork`}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                      }}
+                      onError={(e) => {
+                        refreshImageOnMobile(e.target);
+                      }}
+                    />
+                  ) : (
+                    <MusicNoteIcon sx={{ fontSize: 120, color: theme.palette.grey[500] }} />
+                  )}
+                </Box>
+
+                {/* Track Info - Horizontal Layout */}
+                <Box sx={{ textAlign: 'center', mb: 4, width: '100%' }}>
+                  <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }} noWrap>
+                    {storeCurrentTrack?.title || storeCurrentTrack?.filename}
+                  </Typography>
+                  <Typography 
+                    variant="body1" 
+                    color="text.secondary" 
+                    sx={{ mb: 0.5 }}
+                    noWrap
+                  >
+                    {storeCurrentTrack?.artist || 'Unknown Artist'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" noWrap>
+                    {storeCurrentTrack?.album || 'Unknown Album'}
+                  </Typography>
+                </Box>
+
+                {/* Progress Bar */}
+                <Box sx={{ width: '100%', mb: 3 }}>
+                  <Box
+                    sx={{
+                      width: '100%',
+                      height: 6,
+                      backgroundColor: theme.palette.mode === 'dark' 
+                        ? 'rgba(255,255,255,0.1)' 
+                        : 'rgba(0,0,0,0.1)',
+                      borderRadius: 3,
+                      cursor: 'pointer',
+                      position: 'relative',
+                      '&:hover': {
+                        '& .progress-thumb': {
+                          opacity: 1,
+                          transform: 'scale(1)',
+                        }
+                      }
+                    }}
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const percent = (e.clientX - rect.left) / rect.width;
+                      const newTime = percent * (duration || 0);
+                      handleSeek(newTime);
+                    }}
+                  >
                     <Box
                       sx={{
-                        width: 64,
-                        height: 64,
-                        borderRadius: 2,
-                        overflow: 'hidden',
-                        flexShrink: 0,
-                        background: theme.palette.grey[200],
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
+                        width: `${duration ? (currentTime / duration) * 100 : 0}%`,
+                        height: '100%',
+                        backgroundColor: colors.primary,
+                        borderRadius: 3,
+                        position: 'relative',
+                        boxShadow: `0 0 12px ${colors.primary}50`,
                       }}
                     >
-                      {storeCurrentTrack?.artwork_path ? (
-                        <img
-                          src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/cache/artwork/${storeCurrentTrack.artwork_path.split('/').pop()}?v=${Date.now()}`}
-                          alt={`${storeCurrentTrack.album} artwork`}
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover'
-                          }}
-                        />
-                      ) : (
-                        <MusicNoteIcon sx={{ fontSize: 32, color: theme.palette.grey[500] }} />
-                      )}
-                    </Box>
-
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography variant="h6" noWrap sx={{ fontWeight: 600 }}>
-                        {storeCurrentTrack?.title || storeCurrentTrack?.filename}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" noWrap>
-                        {storeCurrentTrack?.artist}
-                      </Typography>
-                      {storeCurrentTrack?.album && (
-                        <Typography variant="caption" color="text.secondary" noWrap>
-                          {storeCurrentTrack.album}
-                        </Typography>
-                      )}
+                      <Box
+                        className="progress-thumb"
+                        sx={{
+                          position: 'absolute',
+                          right: -6,
+                          top: -3,
+                          width: 12,
+                          height: 12,
+                          borderRadius: '50%',
+                          background: '#ffffff',
+                          boxShadow: `0 2px 8px ${colors.primary}60`,
+                          opacity: 0,
+                          transform: 'scale(0.8)',
+                          transition: 'all 0.2s ease'
+                        }}
+                      />
                     </Box>
                   </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      {Math.floor(currentTime / 60)}:{String(Math.floor(currentTime % 60)).padStart(2, '0')}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {Math.floor((duration || 0) / 60)}:{String(Math.floor((duration || 0) % 60)).padStart(2, '0')}
+                    </Typography>
+                  </Box>
+                </Box>
 
-                  {/* Progress Bar */}
-                  <Box sx={{ mb: 2 }}>
+                {/* Main Controls */}
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2, mb: 3 }}>
+                  <IconButton
+                    onClick={previousTrack}
+                    disabled={queue.length <= 1 || currentQueueIndex <= 0}
+                    sx={{
+                      fontSize: 32,
+                      color: 'text.primary',
+                      '&:hover': {
+                        backgroundColor: 'action.hover',
+                        transform: 'scale(1.1)',
+                      },
+                      '&.Mui-disabled': { color: 'text.disabled' },
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <SkipPreviousIcon sx={{ fontSize: 32 }} />
+                  </IconButton>
+
+                  <IconButton
+                    onClick={() => togglePlayback()}
+                    sx={{
+                      backgroundColor: colors.primary,
+                      color: 'white',
+                      width: 64,
+                      height: 64,
+                      '&:hover': {
+                        backgroundColor: colors.secondary,
+                        transform: 'scale(1.05)',
+                      },
+                      boxShadow: `0 8px 24px ${colors.primary}40, 0 4px 16px rgba(0, 0, 0, 0.2)`,
+                      transition: 'all 0.3s ease',
+                    }}
+                  >
+                    {isPlaying ? (
+                      <PauseIcon sx={{ fontSize: 28 }} />
+                    ) : (
+                      <PlayIcon sx={{ fontSize: 28 }} />
+                    )}
+                  </IconButton>
+
+                  <IconButton
+                    onClick={nextTrack}
+                    disabled={queue.length <= 1 || currentQueueIndex >= queue.length - 1}
+                    sx={{
+                      fontSize: 32,
+                      color: 'text.primary',
+                      '&:hover': {
+                        backgroundColor: 'action.hover',
+                        transform: 'scale(1.1)',
+                      },
+                      '&.Mui-disabled': { color: 'text.disabled' },
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <SkipNextIcon sx={{ fontSize: 32 }} />
+                  </IconButton>
+                </Box>
+
+                {/* Secondary Controls */}
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'space-between', 
+                  width: '100%',
+                  px: 2
+                }}>
+                  <IconButton
+                    onClick={() => setShuffle(!shuffle)}
+                    sx={{ 
+                      color: shuffle ? colors.primary : 'text.secondary',
+                      '&:hover': { backgroundColor: 'action.hover' }
+                    }}
+                  >
+                    <ShuffleIcon fontSize="small" />
+                  </IconButton>
+
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, mx: 3 }}>
+                    <VolumeIcon sx={{ fontSize: 20, color: 'text.secondary' }} />
                     <Box
                       sx={{
-                        width: '100%',
+                        flex: 1,
                         height: 4,
-                        backgroundColor: theme.palette.grey[300],
+                        backgroundColor: theme.palette.mode === 'dark' 
+                          ? 'rgba(255,255,255,0.1)' 
+                          : 'rgba(0,0,0,0.1)',
                         borderRadius: 2,
                         cursor: 'pointer',
                         position: 'relative'
@@ -553,139 +757,69 @@ const NowPlaying = () => {
                       onClick={(e) => {
                         const rect = e.currentTarget.getBoundingClientRect();
                         const percent = (e.clientX - rect.left) / rect.width;
-                        const newTime = percent * (storeCurrentTrack?.duration || 0);
-                        handleSeek(newTime);
+                        setVolume(percent);
                       }}
                     >
                       <Box
                         sx={{
-                          width: `${storeCurrentTrack?.duration ? (currentTime / storeCurrentTrack.duration) * 100 : 0}%`,
+                          width: `${volume * 100}%`,
                           height: '100%',
-                          backgroundColor: theme.palette.primary.main,
+                          backgroundColor: colors.secondary,
                           borderRadius: 2,
                         }}
                       />
                     </Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
-                      <Typography variant="caption">
-                        {Math.floor(currentTime / 60)}:{String(Math.floor(currentTime % 60)).padStart(2, '0')}
-                      </Typography>
-                      <Typography variant="caption">
-                        {Math.floor((storeCurrentTrack?.duration || 0) / 60)}:{String(Math.floor((storeCurrentTrack?.duration || 0) % 60)).padStart(2, '0')}
-                      </Typography>
-                    </Box>
                   </Box>
 
-                  {/* Controls */}
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-                    <IconButton
-                      onClick={previousTrack}
-                      disabled={queue.length <= 1 || currentQueueIndex <= 0}
-                    >
-                      <SkipPreviousIcon />
-                    </IconButton>
-                    
-                    <IconButton
-                      onClick={() => togglePlayback()}
-                      sx={{
-                        backgroundColor: theme.palette.primary.main,
-                        color: 'white',
-                        width: 56,
-                        height: 56,
-                        '&:hover': {
-                          backgroundColor: theme.palette.primary.dark,
-                        },
-                      }}
-                    >
-                      {isPlaying ? <PauseIcon /> : <PlayIcon />}
-                    </IconButton>
-                    
-                    <IconButton
-                      onClick={nextTrack}
-                      disabled={queue.length <= 1 || currentQueueIndex >= queue.length - 1}
-                    >
-                      <SkipNextIcon />
-                    </IconButton>
-                  </Box>
-
-                  {/* Secondary Controls */}
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 2 }}>
-                    <IconButton
-                      onClick={() => setShuffle(!shuffle)}
-                      sx={{ color: shuffle ? theme.palette.primary.main : 'text.secondary' }}
-                    >
-                      <ShuffleIcon fontSize="small" />
-                    </IconButton>
-
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, mx: 2 }}>
-                      <VolumeIcon sx={{ fontSize: 18 }} />
-                      <Box
-                        sx={{
-                          flex: 1,
-                          height: 4,
-                          backgroundColor: theme.palette.grey[300],
-                          borderRadius: 2,
-                          cursor: 'pointer',
-                          position: 'relative'
-                        }}
-                        onClick={(e) => {
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          const percent = (e.clientX - rect.left) / rect.width;
-                          setVolume(percent);
-                        }}
-                      >
-                        <Box
-                          sx={{
-                            width: `${volume * 100}%`,
-                            height: '100%',
-                            backgroundColor: theme.palette.primary.main,
-                            borderRadius: 2,
-                          }}
-                        />
-                      </Box>
-                    </Box>
-
-                    <IconButton
-                      onClick={() => {
-                        const nextRepeat = repeat === 'off' ? 'all' : repeat === 'all' ? 'one' : 'off';
-                        setRepeat(nextRepeat);
-                      }}
-                      sx={{ color: repeat !== 'off' ? theme.palette.primary.main : 'text.secondary' }}
-                    >
-                      {repeat === 'one' ? <RepeatOneIcon fontSize="small" /> : <RepeatIcon fontSize="small" />}
-                    </IconButton>
-                  </Box>
-                </CardContent>
-              </Card>
-              
-              {/* Fullscreen toggle */}
-              <Tooltip title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
-                <Fab
-                  size="small"
-                  onClick={toggleFullscreen}
-                  sx={{
-                    position: 'absolute',
-                    top: 8,
-                    right: 8,
-                  }}
-                >
-                  {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
-                </Fab>
-              </Tooltip>
-            </Box>
-          </Grid>
+                  <IconButton
+                    onClick={() => {
+                      const nextRepeat = repeat === 'off' ? 'all' : repeat === 'all' ? 'one' : 'off';
+                      setRepeat(nextRepeat);
+                    }}
+                    sx={{ 
+                      color: repeat !== 'off' ? colors.primary : 'text.secondary',
+                      '&:hover': { backgroundColor: 'action.hover' }
+                    }}
+                  >
+                    {repeat === 'one' ? <RepeatOneIcon fontSize="small" /> : <RepeatIcon fontSize="small" />}
+                  </IconButton>
+                </Box>
+              </Box>
+            </Paper>
+            
+            {/* Fullscreen toggle */}
+            <Tooltip title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
+              <Fab
+                size="small"
+                onClick={toggleFullscreen}
+                sx={{
+                  position: 'absolute',
+                  top: 12,
+                  right: 12,
+                  zIndex: 1,
+                }}
+              >
+                {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+              </Fab>
+            </Tooltip>
+          </Box>
 
           {/* Right Side - Lyrics Section */}
-          <Grid item xs={12} md={isFullscreen ? 12 : 7}>
-            <Paper elevation={2} sx={{ 
-              height: { 
-                md: isFullscreen ? 'calc(100vh - 200px)' : '70vh' 
-              }, 
+          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            <Paper elevation={3} sx={{ 
+              flex: 1,
               display: 'flex', 
-              flexDirection: 'column' 
+              flexDirection: 'column',
+              background: theme.palette.mode === 'dark' 
+                ? 'rgba(30, 30, 30, 0.95)' 
+                : 'rgba(255, 255, 255, 0.95)',
+              backdropFilter: 'blur(20px) saturate(1.2)',
+              WebkitBackdropFilter: 'blur(20px) saturate(1.2)',
+              borderRadius: 3,
+              overflow: 'hidden'
             }}>
               {/* Lyrics Controls */}
-              <Box sx={{ p: 2, borderBottom: `1px solid ${theme.palette.divider}` }}>
+              <Box sx={{ p: 3, borderBottom: `1px solid ${theme.palette.divider}` }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
                   <Tabs value={activeTab} onChange={handleTabChange}>
                     <Tab label="Lyrics View" />
@@ -706,32 +840,13 @@ const NowPlaying = () => {
                       sx={{ mr: 1 }}
                     />
                     
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={autoSeek}
-                          onChange={(e) => setAutoSeek(e.target.checked)}
-                          size="small"
-                        />
-                      }
-                      label="Auto seek"
-                    />
-
                     {/* Action buttons */}
                     {hasLyrics && (
-                      <>
-                        <Tooltip title="Edit lyrics">
-                          <IconButton onClick={() => setShowEditor(true)}>
-                            <EditIcon />
-                          </IconButton>
-                        </Tooltip>
-                        
-                        <Tooltip title="Publish to LRCLIB">
-                          <IconButton onClick={() => setShowPublisher(true)}>
-                            <PublishIcon />
-                          </IconButton>
-                        </Tooltip>
-                      </>
+                      <Tooltip title="Publish to LRCLIB">
+                        <IconButton onClick={() => setShowPublisher(true)}>
+                          <PublishIcon />
+                        </IconButton>
+                      </Tooltip>
                     )}
 
                     {!hasLyrics && (
@@ -748,13 +863,14 @@ const NowPlaying = () => {
               {/* Lyrics Content */}
               <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
                 {activeTab === 0 && (
-                  <Box sx={{ height: '100%', p: 2 }}>
+                  <Box sx={{ height: '100%', p: 3 }}>
                     <SyncedLyricsViewer
                       lyricsContent={lyrics}
                       currentTime={currentTime}
                       onSeek={handleLyricsSeek}
                       isPlaying={isPlaying}
                       showTimestamps={showTimestamps}
+                      accentColor={colors.primary}
                     />
                   </Box>
                 )}
@@ -774,39 +890,8 @@ const NowPlaying = () => {
                 )}
               </Box>
             </Paper>
-          </Grid>
-
-          {/* Track Info Sidebar (only in desktop mode) */}
-          {!isFullscreen && (
-            <Grid item xs={12} md={4}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6" gutterBottom>
-                    Track Information
-                  </Typography>
-                  
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    <Typography variant="body2">
-                      <strong>Title:</strong> {storeCurrentTrack?.title || 'Unknown'}
-                    </Typography>
-                    <Typography variant="body2">
-                      <strong>Artist:</strong> {storeCurrentTrack?.artist || 'Unknown'}
-                    </Typography>
-                    <Typography variant="body2">
-                      <strong>Album:</strong> {storeCurrentTrack?.album || 'Unknown'}
-                    </Typography>
-                    <Typography variant="body2">
-                      <strong>Duration:</strong> {storeCurrentTrack?.duration ? `${Math.floor(storeCurrentTrack.duration / 60)}:${String(Math.floor(storeCurrentTrack.duration % 60)).padStart(2, '0')}` : 'Unknown'}
-                    </Typography>
-                    <Typography variant="body2">
-                      <strong>Has Lyrics:</strong> {hasLyrics ? (isSyncedLyrics ? 'Synchronized' : 'Plain text') : 'No'}
-                    </Typography>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-          )}
-        </Grid>
+          </Box>
+        </Box>
       )}
 
       {/* Dialogs */}

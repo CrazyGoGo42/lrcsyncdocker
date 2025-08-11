@@ -268,7 +268,7 @@ export default function Library() {
                           >
                             {track.artwork_path ? (
                               <img
-                                src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/cache/artwork/${track.artwork_path.split('/').pop()}`}
+                                src={`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/cache/artwork/${track.artwork_path.split('/').pop()}?v=${Date.now()}`}
                                 alt={`${track.album} artwork`}
                                 style={{
                                   width: '100%',
@@ -455,18 +455,29 @@ export default function Library() {
         )}
 
         {/* Pagination */}
-        <TablePagination
-          component="div"
-          count={totalTracks}
-          rowsPerPage={rowsPerPage}
-          page={page}
-          onPageChange={(event, newPage) => setPage(newPage)}
-          onRowsPerPageChange={(event) => {
-            setRowsPerPage(parseInt(event.target.value, 10));
-            setPage(0);
-          }}
-          rowsPerPageOptions={[10, 25, 50, 100]}
-        />
+        <Box sx={{ 
+          position: 'relative', 
+          zIndex: 1000,
+          backgroundColor: 'background.paper',
+          borderTop: '1px solid',
+          borderColor: 'divider',
+          py: 1,
+          px: 2,
+          mt: 1
+        }}>
+          <TablePagination
+            component="div"
+            count={totalTracks}
+            rowsPerPage={rowsPerPage}
+            page={page}
+            onPageChange={(event, newPage) => setPage(newPage)}
+            onRowsPerPageChange={(event) => {
+              setRowsPerPage(parseInt(event.target.value, 10));
+              setPage(0);
+            }}
+            rowsPerPageOptions={[10, 25, 50, 100]}
+          />
+        </Box>
       </Paper>
 
       {/* Lyrics Editor Dialog */}
